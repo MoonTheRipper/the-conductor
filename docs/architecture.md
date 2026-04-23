@@ -33,10 +33,12 @@ Native macOS presentation shell:
 - debug gesture simulator for deterministic tuning
 - Vision + AVFoundation live hand-tracking path
 - persistent gesture calibration remapping on top of raw tracking input
+- richer live gesture features derived from spread, roll, and horizontal motion
 - Core MIDI bridge with virtual source and direct destination routing
 - standalone instrument catalog discovery for AU, VST/VST3, and library folders
 - standalone Audio Unit host service for direct local playback with per-layer assignment
 - sampler-backed layer hosting for indexed library folders
+- per-layer bus, pan, delay, and reverb routing inside the host graph
 - loop transport and MIDI export controls in the desktop shell
 - searchable catalog UI and indexed library summaries for current sampler-backed hosting
 
@@ -62,7 +64,8 @@ macOS first:
 - VST/VST3 filesystem discovery
 - Audio Unit hosting inside a shared `AVAudioEngine`
 - `AVAudioUnitSampler` loading from indexed library folders
-- Standard MIDI file export for captured phrases
+- per-layer mixer, delay, reverb, and bus routing inside the standalone host graph
+- multi-track standard MIDI file export for captured phrases, with UI-driven tempo and repeat metadata
 - Logic Bridge layer routing orchestration channels into the DAW
 
 Cross-platform expansion:

@@ -64,7 +64,9 @@ public struct PerformanceEngine: Sendable {
 
             let normalizedHeight = 1.0 - ((rightHand.position.y + 1.0) / 2.0)
             let gestureEnergy = max(0.0, -rightHand.verticalVelocity) * 0.22
-            state.dynamics = clamped(normalizedHeight + gestureEnergy, lower: 0.12, upper: 1.0)
+            let opennessLift = rightHand.spread * 0.16
+            let shapeLift = abs(rightHand.roll) * 0.08
+            state.dynamics = clamped(normalizedHeight + gestureEnergy + opennessLift + shapeLift, lower: 0.12, upper: 1.0)
         }
 
         if let leftHand = snapshot.leftHand {
@@ -121,6 +123,17 @@ public struct PerformanceEngine: Sendable {
         }
 
         if rightHand.openness == .open && rightHand.verticalVelocity < -0.72 {
+            let wasPerforming = state.isPerforming
+            state.isPerforming = true
+            state.activityText = "Ensemble engaged"
+            lastTransportTimestamp = snapshot.timestamp
+            return wasPerforming ? [] : [
+                .transportChanged(isPerforming: true, timestamp: snapshot.timestamp),
+            ]
+        }
+
+        let gestureDownbeatStrength = (-rightHand.verticalVelocity * 0.78) + (rightHand.spread * 0.22)
+        if rightHand.openness == .open && gestureDownbeatStrength > 0.92 {
             let wasPerforming = state.isPerforming
             state.isPerforming = true
             state.activityText = "Ensemble engaged"
@@ -204,11 +217,15 @@ public struct PerformanceEngine: Sendable {
 
     private mutating func updateLayers(with snapshot: GestureSnapshot) {
         let leftRadius = snapshot.leftHand.map { clamped(simd_length($0.position)) } ?? 0.35
+        let leftSpread = snapshot.leftHand?.spread ?? 0.45
+        let rightSpread = snapshot.rightHand?.spread ?? 0.45
+        let rightRoll = abs(snapshot.rightHand?.roll ?? 0)
+        let horizontalMotion = abs(snapshot.rightHand?.horizontalVelocity ?? 0)
         let intervalWeight = Double(state.interval.rawValue) / Double(IntervalChoice.thirteenth.rawValue)
-        let stringsMix = clamped(0.45 + state.dynamics * 0.30 - leftRadius * 0.12)
-        let brassMix = clamped(state.dynamics * 0.80 + intervalWeight * 0.18)
-        let woodsMix = clamped(0.25 + (1.0 - leftRadius) * 0.55)
-        let pulseMix = clamped(0.18 + leftRadius * 0.72)
+        let stringsMix = clamped(0.45 + state.dynamics * 0.30 - leftRadius * 0.12 + rightSpread * 0.12)
+        let brassMix = clamped(state.dynamics * 0.80 + intervalWeight * 0.18 + rightRoll * 0.12)
+        let woodsMix = clamped(0.25 + (1.0 - leftRadius) * 0.55 + leftSpread * 0.10)
+        let pulseMix = clamped(0.18 + leftRadius * 0.72 + horizontalMotion * 0.12)
 
         state.layers = [
             LayerState(name: "Strings", mix: stringsMix, isEnabled: state.isPerforming),

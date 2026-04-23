@@ -8,6 +8,7 @@ struct LayerHostedInstrumentSelection {
     let instrument: InstrumentDescriptor?
     let audioUnitDescription: AudioComponentDescription?
     let sampleLibraryLoadPlan: SampleLibraryLoadPlan?
+    let outputSettings: LayerOutputSettings
     let capabilitySummary: String
 }
 
@@ -25,14 +26,45 @@ private enum HostedLayerKind {
     }
 }
 
-private struct HostedLayerSlot {
+private final class HostedLayerSlot {
     let layerName: String
     let instrumentID: String
     let instrumentName: String
     let hostedKind: HostedLayerKind
-    let busLabel: String
-    let hostSummaryText: String
+    let sourceSummaryText: String
     let midiInstrument: AVAudioUnitMIDIInstrument
+    let layerMixer: AVAudioMixerNode
+    let delay: AVAudioUnitDelay
+    let reverb: AVAudioUnitReverb
+    var outputSettings: LayerOutputSettings
+
+    init(
+        layerName: String,
+        instrumentID: String,
+        instrumentName: String,
+        hostedKind: HostedLayerKind,
+        sourceSummaryText: String,
+        midiInstrument: AVAudioUnitMIDIInstrument,
+        layerMixer: AVAudioMixerNode,
+        delay: AVAudioUnitDelay,
+        reverb: AVAudioUnitReverb,
+        outputSettings: LayerOutputSettings
+    ) {
+        self.layerName = layerName
+        self.instrumentID = instrumentID
+        self.instrumentName = instrumentName
+        self.hostedKind = hostedKind
+        self.sourceSummaryText = sourceSummaryText
+        self.midiInstrument = midiInstrument
+        self.layerMixer = layerMixer
+        self.delay = delay
+        self.reverb = reverb
+        self.outputSettings = outputSettings
+    }
+
+    var topologyText: String {
+        "\(sourceSummaryText) -> \(outputSettings.bus.rawValue) bus · pan \(Int(outputSettings.pan * 100)) · space \(Int(outputSettings.reverbMix))% · echo \(Int(outputSettings.delayMix))%"
+    }
 }
 
 @MainActor
@@ -47,14 +79,17 @@ final class StandaloneAudioHostService: ObservableObject {
 
     private let engine = AVAudioEngine()
     private var layerSlotsByName: [String: HostedLayerSlot] = [:]
+    private var busMixersByID: [LayerOutputBus: AVAudioMixerNode] = [:]
     private var noteGeneration = 0
     private var activeNotesByLayer: [String: Set<UInt8>] = [:]
 
     init() {
+        setupBusMixersIfNeeded()
         startEngineIfNeeded()
     }
 
     func configureAssignments(_ selections: [LayerHostedInstrumentSelection]) {
+        setupBusMixersIfNeeded()
         startEngineIfNeeded()
 
         let desiredLayers = Set(selections.map(\.layerName))
@@ -71,7 +106,10 @@ final class StandaloneAudioHostService: ObservableObject {
                 continue
             }
 
-            if let existingSlot = layerSlotsByName[selection.layerName], existingSlot.instrumentID == instrument.id {
+            if let existingSlot = layerSlotsByName[selection.layerName],
+               existingSlot.instrumentID == instrument.id,
+               matchesHostedKind(of: existingSlot, for: instrument) {
+                applyOutputSettings(selection.outputSettings, to: existingSlot)
                 readyLayers.append(selection.layerName)
                 continue
             }
@@ -88,7 +126,8 @@ final class StandaloneAudioHostService: ObservableObject {
                     layerName: selection.layerName,
                     instrumentID: instrument.id,
                     instrumentName: instrument.name,
-                    description: description
+                    description: description,
+                    outputSettings: selection.outputSettings
                 )
                 readyLayers.append(selection.layerName)
             case .sampleLibrary:
@@ -103,7 +142,8 @@ final class StandaloneAudioHostService: ObservableObject {
                     layerName: selection.layerName,
                     instrumentID: instrument.id,
                     instrumentName: instrument.name,
-                    loadPlan: sampleLibraryLoadPlan
+                    loadPlan: sampleLibraryLoadPlan,
+                    outputSettings: selection.outputSettings
                 )
                 readyLayers.append(selection.layerName)
             case .vst3:
@@ -173,7 +213,7 @@ final class StandaloneAudioHostService: ObservableObject {
         }
 
         guard renderedLayers.isEmpty == false else {
-            statusText = "Enabled layers have no loaded Audio Unit assignments"
+            statusText = "Enabled layers have no loaded standalone assignments"
             return
         }
 
@@ -214,6 +254,15 @@ final class StandaloneAudioHostService: ObservableObject {
         supportText = "No layer assignments"
     }
 
+    private func matchesHostedKind(of slot: HostedLayerSlot, for instrument: InstrumentDescriptor) -> Bool {
+        switch (slot.hostedKind, instrument.format) {
+        case (.audioUnit, .audioUnit), (.sampler, .sampleLibrary):
+            return true
+        default:
+            return false
+        }
+    }
+
     private func supportSummary(assignedCount: Int) -> String {
         let loadedCount = layerSlotsByName.count
         if assignedCount == 0 {
@@ -222,29 +271,53 @@ final class StandaloneAudioHostService: ObservableObject {
         return "\(loadedCount)/\(assignedCount) assigned layer\(assignedCount == 1 ? "" : "s") loaded"
     }
 
+    private func setupBusMixersIfNeeded() {
+        for bus in LayerOutputBus.allCases where busMixersByID[bus] == nil {
+            let mixer = AVAudioMixerNode()
+            engine.attach(mixer)
+            engine.connect(mixer, to: engine.mainMixerNode, format: nil)
+            mixer.outputVolume = bus.defaultVolume
+            busMixersByID[bus] = mixer
+        }
+    }
+
     private func loadAudioUnit(
         layerName: String,
         instrumentID: String,
         instrumentName: String,
-        description: AudioComponentDescription
+        description: AudioComponentDescription,
+        outputSettings: LayerOutputSettings
     ) {
         unloadSlot(for: layerName)
         startEngineIfNeeded()
 
         let instrument = AVAudioUnitMIDIInstrument(audioComponentDescription: description)
-        engine.attach(instrument)
-        engine.connect(instrument, to: engine.mainMixerNode, format: nil)
-        startEngineIfNeeded()
+        let layerMixer = AVAudioMixerNode()
+        let delay = AVAudioUnitDelay()
+        let reverb = AVAudioUnitReverb()
+        configureHostedNodes(
+            midiInstrument: instrument,
+            layerMixer: layerMixer,
+            delay: delay,
+            reverb: reverb,
+            outputSettings: outputSettings
+        )
 
-        layerSlotsByName[layerName] = HostedLayerSlot(
+        let slot = HostedLayerSlot(
             layerName: layerName,
             instrumentID: instrumentID,
             instrumentName: instrumentName,
             hostedKind: .audioUnit,
-            busLabel: busLabel(for: layerName),
-            hostSummaryText: "Audio Unit -> \(busLabel(for: layerName))",
-            midiInstrument: instrument
+            sourceSummaryText: "Audio Unit",
+            midiInstrument: instrument,
+            layerMixer: layerMixer,
+            delay: delay,
+            reverb: reverb,
+            outputSettings: outputSettings
         )
+
+        layerSlotsByName[layerName] = slot
+        applyOutputSettings(outputSettings, to: slot)
         updatePublishedState()
     }
 
@@ -252,35 +325,73 @@ final class StandaloneAudioHostService: ObservableObject {
         layerName: String,
         instrumentID: String,
         instrumentName: String,
-        loadPlan: SampleLibraryLoadPlan
+        loadPlan: SampleLibraryLoadPlan,
+        outputSettings: LayerOutputSettings
     ) {
         unloadSlot(for: layerName)
         startEngineIfNeeded()
 
         let sampler = AVAudioUnitSampler()
-        engine.attach(sampler)
-        engine.connect(sampler, to: engine.mainMixerNode, format: nil)
+        let layerMixer = AVAudioMixerNode()
+        let delay = AVAudioUnitDelay()
+        let reverb = AVAudioUnitReverb()
+        configureHostedNodes(
+            midiInstrument: sampler,
+            layerMixer: layerMixer,
+            delay: delay,
+            reverb: reverb,
+            outputSettings: outputSettings
+        )
 
         do {
             let resolvedHostSummary = try loadSampleLibrary(into: sampler, with: loadPlan)
             sampler.overallGain = -4
             startEngineIfNeeded()
 
-            layerSlotsByName[layerName] = HostedLayerSlot(
+            let slot = HostedLayerSlot(
                 layerName: layerName,
                 instrumentID: instrumentID,
                 instrumentName: instrumentName,
                 hostedKind: .sampler,
-                busLabel: busLabel(for: layerName),
-                hostSummaryText: "\(resolvedHostSummary) -> \(busLabel(for: layerName))",
-                midiInstrument: sampler
+                sourceSummaryText: resolvedHostSummary,
+                midiInstrument: sampler,
+                layerMixer: layerMixer,
+                delay: delay,
+                reverb: reverb,
+                outputSettings: outputSettings
             )
+
+            layerSlotsByName[layerName] = slot
+            applyOutputSettings(outputSettings, to: slot)
             updatePublishedState()
         } catch {
-            engine.disconnectNodeOutput(sampler)
-            engine.detach(sampler)
+            teardownNodes(midiInstrument: sampler, layerMixer: layerMixer, delay: delay, reverb: reverb)
             statusText = "Failed to load \(instrumentName) on \(layerName): \(error.localizedDescription)"
         }
+    }
+
+    private func configureHostedNodes(
+        midiInstrument: AVAudioUnitMIDIInstrument,
+        layerMixer: AVAudioMixerNode,
+        delay: AVAudioUnitDelay,
+        reverb: AVAudioUnitReverb,
+        outputSettings: LayerOutputSettings
+    ) {
+        engine.attach(midiInstrument)
+        engine.attach(layerMixer)
+        engine.attach(delay)
+        engine.attach(reverb)
+
+        reverb.loadFactoryPreset(.mediumHall)
+        delay.feedback = 18
+        delay.lowPassCutoff = 15_000
+
+        engine.connect(midiInstrument, to: layerMixer, format: nil)
+        engine.connect(layerMixer, to: delay, format: nil)
+        engine.connect(delay, to: reverb, format: nil)
+        engine.connect(reverb, to: busMixer(for: outputSettings.bus), format: nil)
+
+        startEngineIfNeeded()
     }
 
     private func loadSampleLibrary(
@@ -309,9 +420,44 @@ final class StandaloneAudioHostService: ObservableObject {
 
         guard let slot = layerSlotsByName.removeValue(forKey: layerName) else { return }
 
-        engine.disconnectNodeOutput(slot.midiInstrument)
-        engine.detach(slot.midiInstrument)
+        teardownNodes(
+            midiInstrument: slot.midiInstrument,
+            layerMixer: slot.layerMixer,
+            delay: slot.delay,
+            reverb: slot.reverb
+        )
         activeNotesByLayer.removeValue(forKey: layerName)
+        updatePublishedState()
+    }
+
+    private func teardownNodes(
+        midiInstrument: AVAudioUnitMIDIInstrument,
+        layerMixer: AVAudioMixerNode,
+        delay: AVAudioUnitDelay,
+        reverb: AVAudioUnitReverb
+    ) {
+        engine.disconnectNodeOutput(midiInstrument)
+        engine.disconnectNodeOutput(layerMixer)
+        engine.disconnectNodeOutput(delay)
+        engine.disconnectNodeOutput(reverb)
+        engine.detach(midiInstrument)
+        engine.detach(layerMixer)
+        engine.detach(delay)
+        engine.detach(reverb)
+    }
+
+    private func applyOutputSettings(_ outputSettings: LayerOutputSettings, to slot: HostedLayerSlot) {
+        if slot.outputSettings.bus != outputSettings.bus {
+            engine.disconnectNodeOutput(slot.reverb)
+            engine.connect(slot.reverb, to: busMixer(for: outputSettings.bus), format: nil)
+        }
+
+        slot.outputSettings = outputSettings
+        slot.layerMixer.pan = Float(outputSettings.pan)
+        slot.delay.wetDryMix = Float(outputSettings.delayMix)
+        slot.delay.delayTime = outputSettings.delayTime
+        slot.delay.feedback = Float(min(max(outputSettings.delayMix * 0.55, 0), 48))
+        slot.reverb.wetDryMix = Float(outputSettings.reverbMix)
         updatePublishedState()
     }
 
@@ -332,7 +478,7 @@ final class StandaloneAudioHostService: ObservableObject {
             uniqueKeysWithValues: layerSlotsByName.map { ($0.key, $0.value.instrumentName) }
         )
         layerTopologyText = Dictionary(
-            uniqueKeysWithValues: layerSlotsByName.map { ($0.key, $0.value.hostSummaryText) }
+            uniqueKeysWithValues: layerSlotsByName.map { ($0.key, $0.value.topologyText) }
         )
         loadedInstrumentName = loadedLayerNames.isEmpty
             ? nil
@@ -343,9 +489,9 @@ final class StandaloneAudioHostService: ObservableObject {
         isInstrumentLoaded = loadedLayerNames.isEmpty == false
     }
 
-    private func busLabel(for layerName: String) -> String {
-        let channel = Int(PerformanceLayerPlanner.channel(for: layerName) ?? 0) + 1
-        return "Main Mixer Bus · ch \(channel)"
+    private func busMixer(for bus: LayerOutputBus) -> AVAudioMixerNode {
+        setupBusMixersIfNeeded()
+        return busMixersByID[bus] ?? engine.mainMixerNode
     }
 
     private func startEngineIfNeeded() {
@@ -361,6 +507,19 @@ final class StandaloneAudioHostService: ObservableObject {
         } catch {
             isEngineRunning = false
             statusText = "Audio engine failed to start: \(error.localizedDescription)"
+        }
+    }
+}
+
+private extension LayerOutputBus {
+    var defaultVolume: Float {
+        switch self {
+        case .core:
+            return 1.0
+        case .halo:
+            return 0.95
+        case .drive:
+            return 0.92
         }
     }
 }

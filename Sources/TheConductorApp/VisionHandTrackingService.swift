@@ -177,6 +177,7 @@ final class HandPoseProcessor {
         return request
     }()
 
+    private var lastMappedXByHand: [HandKey: Double] = [:]
     private var lastMappedYByHand: [HandKey: Double] = [:]
     private var lastTimestampByHand: [HandKey: TimeInterval] = [:]
     private var lastProcessedTime: TimeInterval = 0
@@ -237,7 +238,9 @@ final class HandPoseProcessor {
             let indexTip = point(.indexTip, in: points),
             let middleTip = point(.middleTip, in: points),
             let ringTip = point(.ringTip, in: points),
-            let littleTip = point(.littleTip, in: points)
+            let littleTip = point(.littleTip, in: points),
+            let indexMCP = point(.indexMCP, in: points),
+            let littleMCP = point(.littleMCP, in: points)
         else {
             return nil
         }
@@ -264,11 +267,17 @@ final class HandPoseProcessor {
         }
 
         let handKey = handKey(for: observation.chirality)
+        let previousX = lastMappedXByHand[handKey] ?? mappedPosition.x
         let previousY = lastMappedYByHand[handKey] ?? mappedPosition.y
         let previousTimestamp = lastTimestampByHand[handKey] ?? timestamp
         let deltaTime = max(timestamp - previousTimestamp, 0.016)
+        let horizontalVelocity = (mappedPosition.x - previousX) / deltaTime
         let verticalVelocity = -((mappedPosition.y - previousY) / deltaTime)
+        let spread = clampValue(simd_distance(indexTip, littleTip) / 0.42)
+        let rollRadians = atan2(littleMCP.y - indexMCP.y, littleMCP.x - indexMCP.x)
+        let roll = clampValue(rollRadians / (.pi / 2), lower: -1.0, upper: 1.0)
 
+        lastMappedXByHand[handKey] = mappedPosition.x
         lastMappedYByHand[handKey] = mappedPosition.y
         lastTimestampByHand[handKey] = timestamp
 
@@ -276,7 +285,10 @@ final class HandPoseProcessor {
             position: mappedPosition,
             pinch: pinch,
             openness: openness,
-            verticalVelocity: clampValue(verticalVelocity, lower: -1.4, upper: 1.4)
+            verticalVelocity: clampValue(verticalVelocity, lower: -1.4, upper: 1.4),
+            horizontalVelocity: clampValue(horizontalVelocity, lower: -1.4, upper: 1.4),
+            spread: spread,
+            roll: roll
         )
     }
 

@@ -86,6 +86,44 @@ struct PerformanceEngineTests {
     }
 
     @Test
+    func widerRightHandBoostsDynamics() {
+        var narrowEngine = PerformanceEngine(keyCenter: .c)
+        _ = narrowEngine.handle(snapshot: snapshot(
+            rightPosition: SIMD2<Double>(0.05, -0.3),
+            rightSpread: 0.2,
+            timestamp: 0.0
+        ))
+
+        var wideEngine = PerformanceEngine(keyCenter: .c)
+        _ = wideEngine.handle(snapshot: snapshot(
+            rightPosition: SIMD2<Double>(0.05, -0.3),
+            rightSpread: 0.9,
+            timestamp: 0.0
+        ))
+
+        #expect(wideEngine.state.dynamics > narrowEngine.state.dynamics)
+    }
+
+    @Test
+    func horizontalMotionBoostsPulseLayerMix() {
+        var stillEngine = PerformanceEngine(keyCenter: .c)
+        _ = stillEngine.handle(snapshot: snapshot(
+            rightHorizontalVelocity: 0.0,
+            timestamp: 0.0
+        ))
+
+        var movingEngine = PerformanceEngine(keyCenter: .c)
+        _ = movingEngine.handle(snapshot: snapshot(
+            rightHorizontalVelocity: 1.2,
+            timestamp: 0.0
+        ))
+
+        let stillPulse = stillEngine.state.layers.first(where: { $0.name == "Pulse" })?.mix ?? 0
+        let movingPulse = movingEngine.state.layers.first(where: { $0.name == "Pulse" })?.mix ?? 0
+        #expect(movingPulse > stillPulse)
+    }
+
+    @Test
     func repeatedChordCanStillBeCapturedAfterTimeGap() {
         var engine = PerformanceEngine(keyCenter: .c)
 
@@ -106,6 +144,12 @@ struct PerformanceEngineTests {
         rightPinch: Double = 0.18,
         leftOpenness: HandOpenness = .relaxed,
         rightOpenness: HandOpenness = .open,
+        leftHorizontalVelocity: Double = 0,
+        rightHorizontalVelocity: Double = 0,
+        leftSpread: Double = 0.45,
+        rightSpread: Double = 0.45,
+        leftRoll: Double = 0,
+        rightRoll: Double = 0,
         timestamp: TimeInterval
     ) -> GestureSnapshot {
         GestureSnapshot(
@@ -113,13 +157,19 @@ struct PerformanceEngineTests {
                 position: leftPosition,
                 pinch: leftPinch,
                 openness: leftOpenness,
-                verticalVelocity: 0
+                verticalVelocity: 0,
+                horizontalVelocity: leftHorizontalVelocity,
+                spread: leftSpread,
+                roll: leftRoll
             ),
             rightHand: HandState(
                 position: rightPosition,
                 pinch: rightPinch,
                 openness: rightOpenness,
-                verticalVelocity: -0.2
+                verticalVelocity: -0.2,
+                horizontalVelocity: rightHorizontalVelocity,
+                spread: rightSpread,
+                roll: rightRoll
             ),
             timestamp: timestamp
         )

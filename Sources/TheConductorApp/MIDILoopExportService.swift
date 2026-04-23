@@ -6,9 +6,8 @@ import UniformTypeIdentifiers
 @MainActor
 final class MIDILoopExportService {
     private let pulsesPerQuarterNote: UInt16 = 480
-    private let microsecondsPerQuarterNote: UInt32 = 500_000
 
-    func export(loopBuffer: LoopBuffer, layers: [LayerState]) throws -> URL {
+    func export(loopBuffer: LoopBuffer, layers: [LayerState], options: MIDIExportOptions) throws -> URL {
         guard loopBuffer.phrase.isEmpty == false else {
             throw ExportError.noLoop
         }
@@ -16,7 +15,7 @@ final class MIDILoopExportService {
         let panel = NSSavePanel()
         panel.title = "Export MIDI Loop"
         panel.prompt = "Export MIDI"
-        panel.nameFieldStringValue = "The Conductor Loop.mid"
+        panel.nameFieldStringValue = "\(options.clipName).mid"
         if let midiType = UTType(filenameExtension: "mid") {
             panel.allowedContentTypes = [midiType]
         }
@@ -25,84 +24,150 @@ final class MIDILoopExportService {
             throw ExportError.cancelled
         }
 
-        let data = buildMIDIFile(loopBuffer: loopBuffer, layers: layers)
+        let data = buildMIDIFile(loopBuffer: loopBuffer, layers: layers, options: options)
         try data.write(to: url, options: .atomic)
         return url
     }
 
-    private func buildMIDIFile(loopBuffer: LoopBuffer, layers: [LayerState]) -> Data {
-        let trackData = buildTrack(loopBuffer: loopBuffer, layers: layers)
+    private func buildMIDIFile(loopBuffer: LoopBuffer, layers: [LayerState], options: MIDIExportOptions) -> Data {
+        let tracks = buildTracks(loopBuffer: loopBuffer, layers: layers, options: options)
 
         var file = Data()
         file.append(ascii: "MThd")
         file.append(uint32: 6)
-        file.append(uint16: 0)
         file.append(uint16: 1)
+        file.append(uint16: UInt16(tracks.count))
         file.append(uint16: pulsesPerQuarterNote)
 
-        file.append(ascii: "MTrk")
-        file.append(uint32: UInt32(trackData.count))
-        file.append(trackData)
+        for track in tracks {
+            file.append(ascii: "MTrk")
+            file.append(uint32: UInt32(track.count))
+            file.append(track)
+        }
         return file
     }
 
-    private func buildTrack(loopBuffer: LoopBuffer, layers: [LayerState]) -> Data {
+    private func buildTracks(loopBuffer: LoopBuffer, layers: [LayerState], options: MIDIExportOptions) -> [Data] {
+        var tracks: [Data] = [buildTempoTrack(loopBuffer: loopBuffer, options: options)]
+
+        for layerName in PerformanceLayerPlanner.layerNames {
+            let track = buildLayerTrack(
+                loopBuffer: loopBuffer,
+                layers: layers,
+                layerName: layerName,
+                options: options
+            )
+            if track.isEmpty == false {
+                tracks.append(track)
+            }
+        }
+
+        return tracks
+    }
+
+    private func buildTempoTrack(loopBuffer: LoopBuffer, options: MIDIExportOptions) -> Data {
         let ticksPerSecond = Double(pulsesPerQuarterNote) * 2.0
         let loopStart = loopBuffer.startTimestamp ?? loopBuffer.phrase.first?.timestamp ?? 0.0
-        let loopDuration = max(
+        let singleLoopDuration = max(
             (loopBuffer.endTimestamp ?? loopBuffer.phrase.last?.timestamp ?? loopStart) - loopStart,
             0.5
         )
+        let loopDuration = singleLoopDuration * Double(max(options.repeatCount, 1))
+        let microsecondsPerQuarterNote = UInt32((60.0 / max(options.tempoBPM, 30)) * 1_000_000)
 
-        struct MIDIEvent {
-            let tick: Int
-            let sortOrder: Int
-            let bytes: [UInt8]
-        }
-
-        var events: [MIDIEvent] = [
+        let endTick = Int(loopDuration * ticksPerSecond) + 1
+        let events = [
             MIDIEvent(
                 tick: 0,
                 sortOrder: 0,
                 bytes: [0xFF, 0x51, 0x03] + Array(microsecondsPerQuarterNote.bigEndianBytes.suffix(3))
             ),
+            MIDIEvent(
+                tick: 0,
+                sortOrder: 1,
+                bytes: trackNameMetaEvent("Conductor Tempo")
+            ),
+            MIDIEvent(
+                tick: endTick,
+                sortOrder: 9,
+                bytes: [0xFF, 0x2F, 0x00]
+            ),
         ]
 
-        for phraseEvent in loopBuffer.phrase {
-            let payloads = PerformanceLayerPlanner.payloads(
-                chord: phraseEvent.chord,
-                interval: phraseEvent.interval,
-                dynamics: phraseEvent.dynamics,
-                layers: layers
-            )
+        return serializeTrack(events)
+    }
 
-            let eventTick = Int(max(0.0, phraseEvent.timestamp - loopStart) * ticksPerSecond)
-            let holdDuration = 0.45 + (phraseEvent.dynamics * 0.65)
-            let noteOffTick = Int(min(loopDuration, max(0.1, phraseEvent.timestamp - loopStart + holdDuration)) * ticksPerSecond)
+    private func buildLayerTrack(
+        loopBuffer: LoopBuffer,
+        layers: [LayerState],
+        layerName: String,
+        options: MIDIExportOptions
+    ) -> Data {
+        let ticksPerSecond = Double(pulsesPerQuarterNote) * 2.0
+        let loopStart = loopBuffer.startTimestamp ?? loopBuffer.phrase.first?.timestamp ?? 0.0
+        let singleLoopDuration = max(
+            (loopBuffer.endTimestamp ?? loopBuffer.phrase.last?.timestamp ?? loopStart) - loopStart,
+            0.5
+        )
+        let loopDuration = singleLoopDuration * Double(max(options.repeatCount, 1))
 
-            for payload in payloads {
+        guard let channel = PerformanceLayerPlanner.channel(for: layerName) else {
+            return Data()
+        }
+
+        var events: [MIDIEvent] = [
+            MIDIEvent(tick: 0, sortOrder: 0, bytes: trackNameMetaEvent(layerName)),
+        ]
+
+        for repeatIndex in 0..<max(options.repeatCount, 1) {
+            let cycleOffset = singleLoopDuration * Double(repeatIndex)
+
+            for phraseEvent in loopBuffer.phrase {
+                let payload = PerformanceLayerPlanner.payloads(
+                    chord: phraseEvent.chord,
+                    interval: phraseEvent.interval,
+                    dynamics: phraseEvent.dynamics,
+                    layers: layers
+                ).first(where: { $0.name == layerName })
+
+                guard let payload else { continue }
+
+                let eventTick = Int(max(0.0, phraseEvent.timestamp - loopStart + cycleOffset) * ticksPerSecond)
+                let holdDuration = 0.45 + (phraseEvent.dynamics * 0.65)
+                let noteOffTick = Int(
+                    min(loopDuration, max(0.1, phraseEvent.timestamp - loopStart + cycleOffset + holdDuration)) * ticksPerSecond
+                )
+
                 for note in payload.notes {
                     events.append(
                         MIDIEvent(
                             tick: eventTick,
                             sortOrder: 1,
-                            bytes: [0x90 | payload.channel, note, payload.velocity]
+                            bytes: [0x90 | channel, note, payload.velocity]
                         )
                     )
                     events.append(
                         MIDIEvent(
                             tick: noteOffTick,
                             sortOrder: 0,
-                            bytes: [0x80 | payload.channel, note, 0]
+                            bytes: [0x80 | channel, note, 0]
                         )
                     )
                 }
             }
         }
 
-        let endTick = max(events.map(\.tick).max() ?? 0, Int(loopDuration * ticksPerSecond))
-        events.append(MIDIEvent(tick: endTick + 1, sortOrder: 9, bytes: [0xFF, 0x2F, 0x00]))
-        events.sort {
+        guard events.count > 1 else {
+            return Data()
+        }
+
+        let endTick = max(events.map(\.tick).max() ?? 0, Int(loopDuration * ticksPerSecond)) + 1
+        events.append(MIDIEvent(tick: endTick, sortOrder: 9, bytes: [0xFF, 0x2F, 0x00]))
+        return serializeTrack(events)
+    }
+
+    private func serializeTrack(_ events: [MIDIEvent]) -> Data {
+        let sortedEvents = events.sorted {
             if $0.tick != $1.tick {
                 return $0.tick < $1.tick
             }
@@ -111,13 +176,18 @@ final class MIDILoopExportService {
 
         var track = Data()
         var previousTick = 0
-        for event in events {
+        for event in sortedEvents {
             track.append(contentsOf: variableLengthQuantity(event.tick - previousTick))
             track.append(contentsOf: event.bytes)
             previousTick = event.tick
         }
 
         return track
+    }
+
+    private func trackNameMetaEvent(_ trackName: String) -> [UInt8] {
+        let bytes = Array(trackName.utf8.prefix(127))
+        return [0xFF, 0x03, UInt8(bytes.count)] + bytes
     }
 
     private func variableLengthQuantity(_ value: Int) -> [UInt8] {
@@ -131,6 +201,12 @@ final class MIDILoopExportService {
 
         return buffer
     }
+}
+
+private struct MIDIEvent {
+    let tick: Int
+    let sortOrder: Int
+    let bytes: [UInt8]
 }
 
 enum ExportError: LocalizedError {

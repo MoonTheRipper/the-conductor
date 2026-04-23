@@ -80,9 +80,13 @@ final class SessionViewModel: ObservableObject {
     @Published private(set) var isStandaloneInstrumentLoaded = false
     @Published private(set) var loopTransportStatusText = "No loop captured"
     @Published private(set) var exportStatusText = "No MIDI export yet"
+    @Published var exportOptions: MIDIExportOptions {
+        didSet { persistExportOptions() }
+    }
     @Published private(set) var layerMixMultipliers: [String: Double]
     @Published private(set) var layerManualEnabled: [String: Bool]
     @Published private(set) var layerAssignedInstrumentIDs: [String: String]
+    @Published private(set) var layerOutputSettings: [String: LayerOutputSettings]
 
     private var engine: PerformanceEngine
     private var frameClock: TimeInterval = 0
@@ -101,6 +105,8 @@ final class SessionViewModel: ObservableObject {
     private static let layerMixDefaultsKey = "TheConductor.layerMixMultipliers"
     private static let layerEnabledDefaultsKey = "TheConductor.layerManualEnabled"
     private static let layerAssignmentsDefaultsKey = "TheConductor.layerAssignedInstrumentIDs"
+    private static let layerOutputSettingsDefaultsKey = "TheConductor.layerOutputSettings"
+    private static let exportOptionsDefaultsKey = "TheConductor.exportOptions"
 
     init() {
         let engine = PerformanceEngine(keyCenter: .c)
@@ -110,9 +116,11 @@ final class SessionViewModel: ObservableObject {
         self.intervalLabels = engine.harmonyEngine.intervalLabels
         self.debugState = .seed
         self.calibration = Self.loadCalibration()
+        self.exportOptions = Self.loadExportOptions()
         self.layerMixMultipliers = Self.loadLayerMixMultipliers()
         self.layerManualEnabled = Self.loadLayerManualEnabled()
         self.layerAssignedInstrumentIDs = Self.loadLayerAssignments()
+        self.layerOutputSettings = Self.loadLayerOutputSettings()
         bindLiveTracking()
         bindMIDIBridge()
         bindStandaloneCatalog()
@@ -234,6 +242,17 @@ final class SessionViewModel: ObservableObject {
         )
     }
 
+    func exportOptionsBinding<Value>(_ keyPath: WritableKeyPath<MIDIExportOptions, Value>) -> Binding<Value> {
+        Binding(
+            get: { self.exportOptions[keyPath: keyPath] },
+            set: { newValue in
+                var updated = self.exportOptions
+                updated[keyPath: keyPath] = newValue
+                self.exportOptions = updated
+            }
+        )
+    }
+
     func layerGainBinding(for layerName: String) -> Binding<Double> {
         Binding(
             get: { self.layerMixMultipliers[layerName, default: 1.0] },
@@ -260,6 +279,35 @@ final class SessionViewModel: ObservableObject {
             set: { newValue in
                 self.layerAssignedInstrumentIDs[layerName] = newValue
                 self.persistLayerAssignments()
+                self.configureStandaloneSelection()
+            }
+        )
+    }
+
+    func layerOutputBusBinding(for layerName: String) -> Binding<LayerOutputBus> {
+        Binding(
+            get: { self.layerOutputSettings[layerName]?.bus ?? LayerOutputSettings.default(for: layerName).bus },
+            set: { newValue in
+                var settings = self.layerOutputSettings[layerName] ?? LayerOutputSettings.default(for: layerName)
+                settings.bus = newValue
+                self.layerOutputSettings[layerName] = settings
+                self.persistLayerOutputSettings()
+                self.configureStandaloneSelection()
+            }
+        )
+    }
+
+    func layerOutputScalarBinding(
+        for layerName: String,
+        keyPath: WritableKeyPath<LayerOutputSettings, Double>
+    ) -> Binding<Double> {
+        Binding(
+            get: { self.layerOutputSettings[layerName]?[keyPath: keyPath] ?? LayerOutputSettings.default(for: layerName)[keyPath: keyPath] },
+            set: { newValue in
+                var settings = self.layerOutputSettings[layerName] ?? LayerOutputSettings.default(for: layerName)
+                settings[keyPath: keyPath] = newValue
+                self.layerOutputSettings[layerName] = settings
+                self.persistLayerOutputSettings()
                 self.configureStandaloneSelection()
             }
         )
@@ -303,6 +351,10 @@ final class SessionViewModel: ObservableObject {
 
     func instrumentCatalogLine(for instrument: InstrumentDescriptor) -> String {
         standaloneCatalogService.catalogLine(for: instrument)
+    }
+
+    func layerOutputSummary(for layerName: String) -> String {
+        (layerOutputSettings[layerName] ?? LayerOutputSettings.default(for: layerName)).summaryText
     }
 
     func startLiveTracking() {
@@ -382,6 +434,12 @@ final class SessionViewModel: ObservableObject {
         configureStandaloneSelection()
     }
 
+    func resetLayerOutputRouting() {
+        layerOutputSettings = Self.defaultLayerOutputSettings
+        persistLayerOutputSettings()
+        configureStandaloneSelection()
+    }
+
     func resetCalibration() {
         calibration = GestureCalibration()
     }
@@ -390,9 +448,10 @@ final class SessionViewModel: ObservableObject {
         do {
             let url = try loopExportService.export(
                 loopBuffer: performanceState.loopBuffer,
-                layers: effectiveLayers
+                layers: effectiveLayers,
+                options: exportOptions
             )
-            exportStatusText = "Exported MIDI to \(url.lastPathComponent)"
+            exportStatusText = "Exported layer-aware MIDI to \(url.lastPathComponent)"
         } catch ExportError.cancelled {
             exportStatusText = "MIDI export cancelled"
         } catch {
@@ -629,13 +688,19 @@ final class SessionViewModel: ObservableObject {
                 position: debugState.leftPosition,
                 pinch: debugState.leftPinch,
                 openness: debugState.leftOpenness,
-                verticalVelocity: debugState.leftVerticalVelocity
+                verticalVelocity: debugState.leftVerticalVelocity,
+                horizontalVelocity: 0,
+                spread: simulatedSpread(for: debugState.leftOpenness, pinch: debugState.leftPinch),
+                roll: debugState.leftPosition.x * 0.4
             ),
             rightHand: HandState(
                 position: debugState.rightPosition,
                 pinch: debugState.rightPinch,
                 openness: debugState.rightOpenness,
-                verticalVelocity: debugState.rightVerticalVelocity
+                verticalVelocity: debugState.rightVerticalVelocity,
+                horizontalVelocity: 0,
+                spread: simulatedSpread(for: debugState.rightOpenness, pinch: debugState.rightPinch),
+                roll: debugState.rightPosition.x * 0.4
             ),
             timestamp: frameClock
         )
@@ -806,12 +871,14 @@ final class SessionViewModel: ObservableObject {
             let supportSummary = instrumentID.isEmpty
                 ? "No standalone target assigned"
                 : standaloneCatalogService.standaloneCapabilitySummary(for: instrumentID)
+            let outputSettings = layerOutputSettings[layerName] ?? LayerOutputSettings.default(for: layerName)
 
             return LayerHostedInstrumentSelection(
                 layerName: layerName,
                 instrument: instrument,
                 audioUnitDescription: audioUnitDescription,
                 sampleLibraryLoadPlan: sampleLibraryLoadPlan,
+                outputSettings: outputSettings,
                 capabilitySummary: supportSummary
             )
         }
@@ -859,6 +926,11 @@ final class SessionViewModel: ObservableObject {
         UserDefaults.standard.set(data, forKey: Self.calibrationDefaultsKey)
     }
 
+    private func persistExportOptions() {
+        guard let data = try? JSONEncoder().encode(exportOptions) else { return }
+        UserDefaults.standard.set(data, forKey: Self.exportOptionsDefaultsKey)
+    }
+
     private func persistLayerControls() {
         UserDefaults.standard.set(layerMixMultipliers, forKey: Self.layerMixDefaultsKey)
         UserDefaults.standard.set(layerManualEnabled, forKey: Self.layerEnabledDefaultsKey)
@@ -866,6 +938,11 @@ final class SessionViewModel: ObservableObject {
 
     private func persistLayerAssignments() {
         UserDefaults.standard.set(layerAssignedInstrumentIDs, forKey: Self.layerAssignmentsDefaultsKey)
+    }
+
+    private func persistLayerOutputSettings() {
+        guard let data = try? JSONEncoder().encode(layerOutputSettings) else { return }
+        UserDefaults.standard.set(data, forKey: Self.layerOutputSettingsDefaultsKey)
     }
 
     private static func loadCalibration() -> GestureCalibration {
@@ -902,6 +979,25 @@ final class SessionViewModel: ObservableObject {
         return merged
     }
 
+    private static func loadLayerOutputSettings() -> [String: LayerOutputSettings] {
+        var merged = defaultLayerOutputSettings
+        if let data = UserDefaults.standard.data(forKey: layerOutputSettingsDefaultsKey),
+           let stored = try? JSONDecoder().decode([String: LayerOutputSettings].self, from: data) {
+            merged.merge(stored) { _, stored in stored }
+        }
+        return merged
+    }
+
+    private static func loadExportOptions() -> MIDIExportOptions {
+        guard
+            let data = UserDefaults.standard.data(forKey: exportOptionsDefaultsKey),
+            let options = try? JSONDecoder().decode(MIDIExportOptions.self, from: data)
+        else {
+            return .default
+        }
+        return options
+    }
+
     private func normalizeLayerAssignments() {
         let validIDs = Set(availableInstruments.map(\.id))
         for layerName in PerformanceLayerPlanner.layerNames {
@@ -926,5 +1022,24 @@ final class SessionViewModel: ObservableObject {
 
     private static var defaultLayerManualEnabled: [String: Bool] {
         Dictionary(uniqueKeysWithValues: PerformanceLayerPlanner.layerChannels.map { ($0.name, true) })
+    }
+
+    private static var defaultLayerOutputSettings: [String: LayerOutputSettings] {
+        Dictionary(uniqueKeysWithValues: PerformanceLayerPlanner.layerNames.map {
+            ($0, LayerOutputSettings.default(for: $0))
+        })
+    }
+
+    private func simulatedSpread(for openness: HandOpenness, pinch: Double) -> Double {
+        let base: Double
+        switch openness {
+        case .closed:
+            base = 0.18
+        case .relaxed:
+            base = 0.48
+        case .open:
+            base = 0.82
+        }
+        return min(max(base - (pinch * 0.18), 0.0), 1.0)
     }
 }

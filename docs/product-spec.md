@@ -52,6 +52,8 @@ Loop behavior:
 - keep the selected target visible in the main control surface
 - label non-hostable targets clearly so discovery and playback status are not conflated
 - expose searchable catalog browsing so large plugin installs stay manageable
+- expose per-layer output bus and effect controls inside the same performance surface
+- allow export-time clip naming, tempo choice, and repeat count without leaving the surface
 
 ## Visual Language
 
@@ -60,11 +62,10 @@ Loop behavior:
 - visible current marker, not just labels
 - current chord, interval, loop state, and layer mix visible at a glance
 - layer trims, loop transport, and calibration controls exposed without leaving the main surface
+- standalone routing and effect controls visible without opening a secondary editor
 
 ## Next Milestones
 
-1. Tighten the live hand-tracking model so more than wrist position drives harmony.
-2. Improve beat-intent detection from the live camera path.
-3. Add per-layer effect or bus routing for richer standalone mixes.
-4. Add multi-track MIDI export options and clip metadata.
-5. Add deeper library mapping controls beyond first-pass sampler loading.
+1. Improve beat-intent detection from the live camera path.
+2. Add deeper library mapping controls beyond first-pass sampler loading.
+3. Move the standalone host/audio core toward a portable layer for cross-platform builds.

@@ -31,8 +31,10 @@ The current app is a high-value scaffold, not the final audio app yet. It alread
 - sampler-backed playback for playable library folders assigned per layer
 - timestamp-accurate loop replay based on captured gesture commits
 - manual orchestration trims on top of the auto-generated layer mix
+- per-layer bus, pan, reverb, and delay routing in standalone mode
 - calibration controls for camera-centered gesture remapping
-- MIDI export for the captured loop phrase
+- multi-track MIDI export for the captured loop phrase, with tempo, clip name, and repeat controls
+- richer live hand interpretation from spread, roll, and horizontal motion
 - searchable instrument catalog and indexed library-folder summaries
 
 ## Current Product Modes
@@ -57,13 +59,14 @@ The current standalone catalog implementation exposes:
 - playable library-folder hosting through `AVAudioUnitSampler`
 - panic/all-notes-off control for standalone playback
 - searchable instrument browsing and assign-selected-to-all flow
-- indexed sample/library folder summaries so future sample hosting has useful source context
+- indexed sample/library folder summaries and first-pass playable asset detection
+- per-layer bus and effect routing for richer standalone mixes
 
 The current loop and control implementation exposes:
 
 - loop capture with recorded event timestamps, interval focus, and dynamics
 - restart, pause, and clear transport controls in the app UI
-- standard MIDI file export for the current loop
+- multi-track standard MIDI file export with one musical track per layer, plus export tempo and repeat metadata controls
 - persistent calibration and layer-trim settings through `UserDefaults`
 
 Logic's own internal Library patch browser is not a public automation target, so the product should treat Logic integration and standalone hosting as separate capabilities. Library-folder playback in this app is now handled by sampler loading from the user-indexed folders rather than by controlling Logic's proprietary Library UI.
@@ -88,8 +91,6 @@ sudo xcodebuild -runFirstLaunch
 
 ## Near-Term Build Order
 
-1. Tighten live hand gesture extraction beyond wrist-position tracking.
-2. Add richer live gesture inference for hand openness, orientation, and beat intent.
-3. Add per-layer effect or bus routing for richer standalone mixes.
-4. Add multi-track MIDI export with reusable tempo/clip metadata.
-5. Move the audio/plugin core behind a portable C++ layer for cross-platform builds.
+1. Add deeper library mapping controls beyond first-pass sampler loading.
+2. Improve beat-intent detection from the live camera path even further.
+3. Move the audio/plugin core behind a portable C++ layer for cross-platform builds.

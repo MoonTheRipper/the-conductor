@@ -217,6 +217,7 @@ struct ContentView: View {
                 Text("Orchestration")
                     .sectionTitle()
                 Spacer()
+                actionButton("Reset FX", color: .purple, action: viewModel.resetLayerOutputRouting)
                 Text("Manual trims")
                     .font(.system(size: 11, weight: .bold, design: .rounded))
                     .foregroundStyle(.white.opacity(0.46))
@@ -255,6 +256,47 @@ struct ContentView: View {
 
                     Slider(value: viewModel.layerGainBinding(for: layer.name), in: 0...1.5)
                         .tint(layer.isEnabled ? .orange : .gray)
+
+                    VStack(alignment: .leading, spacing: 8) {
+                        HStack {
+                            Text("Route")
+                                .font(.system(size: 11, weight: .bold, design: .rounded))
+                                .foregroundStyle(.white.opacity(0.58))
+                            Spacer()
+                            Text(viewModel.layerOutputSummary(for: layer.name))
+                                .font(.system(size: 11, weight: .medium, design: .rounded))
+                                .foregroundStyle(.white.opacity(0.52))
+                        }
+
+                        Picker("\(layer.name) Bus", selection: viewModel.layerOutputBusBinding(for: layer.name)) {
+                            ForEach(LayerOutputBus.allCases) { bus in
+                                Text("\(bus.rawValue) · \(bus.summaryText)").tag(bus)
+                            }
+                        }
+                        .pickerStyle(.menu)
+
+                        sliderRow(
+                            title: "Pan",
+                            value: viewModel.layerOutputScalarBinding(for: layer.name, keyPath: \.pan),
+                            range: -1...1
+                        )
+                        sliderRow(
+                            title: "Space",
+                            value: viewModel.layerOutputScalarBinding(for: layer.name, keyPath: \.reverbMix),
+                            range: 0...100
+                        )
+                        sliderRow(
+                            title: "Echo",
+                            value: viewModel.layerOutputScalarBinding(for: layer.name, keyPath: \.delayMix),
+                            range: 0...100
+                        )
+                        sliderRow(
+                            title: "Echo Time",
+                            value: viewModel.layerOutputScalarBinding(for: layer.name, keyPath: \.delayTime),
+                            range: 0.05...0.65
+                        )
+                    }
+                    .padding(.top, 2)
                 }
             }
         }
@@ -301,13 +343,28 @@ struct ContentView: View {
                 .font(.system(size: 12, weight: .medium, design: .rounded))
                 .foregroundStyle(.white.opacity(0.62))
 
+            TextField("Clip Name", text: viewModel.exportOptionsBinding(\.clipName))
+                .textFieldStyle(.roundedBorder)
+
+            sliderRow(
+                title: "Tempo",
+                value: viewModel.exportOptionsBinding(\.tempoBPM),
+                range: 60...180
+            )
+
+            Stepper(value: viewModel.exportOptionsBinding(\.repeatCount), in: 1...8) {
+                Text("Repeat Count: \(viewModel.exportOptions.repeatCount)x")
+                    .font(.system(size: 12, weight: .semibold, design: .rounded))
+                    .foregroundStyle(.white.opacity(0.82))
+            }
+
             HStack(spacing: 10) {
                 actionButton("Restart", color: .mint, action: viewModel.restartLoopPlayback)
                 actionButton("Pause", color: .orange, action: viewModel.pauseLoopPlayback)
                 actionButton("Clear", color: .red, action: viewModel.clearLoop)
             }
 
-            Text("Loop playback now follows the recorded event timing instead of dividing the phrase evenly. Export writes the current loop as a standard MIDI clip.")
+            Text("Loop playback now follows the recorded event timing instead of dividing the phrase evenly. Export writes the current loop as a multi-track MIDI clip with one musical track per layer.")
                 .font(.system(size: 12, weight: .medium, design: .rounded))
                 .foregroundStyle(.white.opacity(0.62))
         }
@@ -378,6 +435,7 @@ struct ContentView: View {
                 liveTip("Fast open-handed downbeat engages the ensemble.")
                 liveTip("Both hands pinched toggles loop capture.")
                 liveTip("Left-hand position selects interval focus.")
+                liveTip("Hand spread and roll now feed dynamics and orchestration shape.")
             }
         }
         .padding(16)

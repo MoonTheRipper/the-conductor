@@ -92,7 +92,7 @@ struct ContentView: View {
                 .foregroundStyle(.white.opacity(0.68))
 
             if let instrument = viewModel.selectedInstrument {
-                Text("Target sound: \(instrument.name) · \(instrument.format.rawValue)")
+                Text("Browse target: \(instrument.name) · \(instrument.format.rawValue)")
                     .font(.system(size: 13, weight: .semibold, design: .rounded))
                     .foregroundStyle(.white.opacity(0.92))
             }
@@ -106,16 +106,18 @@ struct ContentView: View {
                 Text("Standalone Host")
                     .sectionTitle()
                 Spacer()
+                actionButton("Assign Selected", color: .cyan, action: viewModel.assignSelectedInstrumentToAllLayers)
+                actionButton("Clear Layers", color: .orange, action: viewModel.clearLayerAssignments)
                 actionButton("Panic", color: .red, action: viewModel.silenceStandaloneNotes)
             }
 
             HStack(spacing: 10) {
                 statusChip(title: viewModel.isStandaloneEngineRunning ? "Engine Running" : "Engine Stopped", color: .mint)
-                statusChip(title: viewModel.isStandaloneInstrumentLoaded ? "Instrument Loaded" : "Discovery Only", color: .orange)
+                statusChip(title: viewModel.isStandaloneInstrumentLoaded ? "Layers Loaded" : "Discovery Only", color: .orange)
             }
 
             if let loadedInstrumentName = viewModel.standaloneLoadedInstrumentName {
-                Text("Loaded instrument: \(loadedInstrumentName)")
+                Text("Loaded assignments: \(loadedInstrumentName)")
                     .font(.system(size: 13, weight: .semibold, design: .rounded))
                     .foregroundStyle(.white.opacity(0.92))
             }
@@ -126,7 +128,11 @@ struct ContentView: View {
 
             Text(viewModel.standaloneSupportText)
                 .font(.system(size: 12, weight: .medium, design: .rounded))
-                .foregroundStyle(viewModel.isSelectedInstrumentHostableNow ? .mint : .yellow)
+                .foregroundStyle(viewModel.isStandaloneInstrumentLoaded ? .mint : .yellow)
+
+            ForEach(PerformanceLayerPlanner.layerNames, id: \.self) { layerName in
+                layerAssignmentRow(layerName: layerName)
+            }
 
             Text("Standalone playback currently hosts Audio Units directly. VST/VST3 and library entries remain discoverable, but they are not yet instantiated by the host.")
                 .font(.system(size: 12, weight: .medium, design: .rounded))
@@ -404,8 +410,11 @@ struct ContentView: View {
                 actionButton("Refresh", color: .cyan, action: viewModel.refreshStandaloneInstruments)
             }
 
+            TextField("Search instruments, makers, formats", text: $viewModel.instrumentSearchText)
+                .textFieldStyle(.roundedBorder)
+
             Picker("Instrument", selection: $viewModel.selectedInstrumentID) {
-                ForEach(viewModel.availableInstruments) { instrument in
+                ForEach(viewModel.browseInstrumentOptions) { instrument in
                     Text("\(instrument.name) · \(instrument.format.rawValue)").tag(instrument.id)
                 }
             }
@@ -415,24 +424,26 @@ struct ContentView: View {
                 .font(.system(size: 12, weight: .medium, design: .rounded))
                 .foregroundStyle(.white.opacity(0.68))
 
-            ForEach(viewModel.availableInstruments) { instrument in
-                HStack(alignment: .top, spacing: 12) {
-                    Circle()
-                        .fill(instrument.id == viewModel.selectedInstrumentID ? Color.orange : Color.white.opacity(0.22))
-                        .frame(width: 10, height: 10)
-                        .padding(.top, 4)
+            if viewModel.filteredInstruments.isEmpty {
+                Text("No instruments match the current search.")
+                    .font(.system(size: 12, weight: .medium, design: .rounded))
+                    .foregroundStyle(.white.opacity(0.56))
+            } else {
+                ForEach(viewModel.filteredInstruments) { instrument in
+                    HStack(alignment: .top, spacing: 12) {
+                        Circle()
+                            .fill(instrument.id == viewModel.selectedInstrumentID ? Color.orange : Color.white.opacity(0.22))
+                            .frame(width: 10, height: 10)
+                            .padding(.top, 4)
 
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text(instrument.name)
-                            .font(.system(size: 14, weight: .semibold, design: .rounded))
-                            .foregroundStyle(.white)
-                        Text(
-                            instrument.format == .audioUnit
-                                ? "\(instrument.format.rawValue) · hostable now · \(instrument.source)"
-                                : "\(instrument.format.rawValue) · discovery only · \(instrument.source)"
-                        )
-                            .font(.system(size: 12, weight: .medium, design: .rounded))
-                            .foregroundStyle(.white.opacity(0.62))
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(instrument.name)
+                                .font(.system(size: 14, weight: .semibold, design: .rounded))
+                                .foregroundStyle(.white)
+                            Text(viewModel.instrumentCatalogLine(for: instrument))
+                                .font(.system(size: 12, weight: .medium, design: .rounded))
+                                .foregroundStyle(.white.opacity(0.62))
+                        }
                     }
                 }
             }
@@ -464,6 +475,9 @@ struct ContentView: View {
                             Text(folder.displayName)
                                 .font(.system(size: 13, weight: .semibold, design: .rounded))
                                 .foregroundStyle(.white)
+                            Text(folder.summaryText)
+                                .font(.system(size: 11, weight: .medium, design: .rounded))
+                                .foregroundStyle(.white.opacity(0.66))
                             Text(folder.path)
                                 .font(.system(size: 11, weight: .medium, design: .rounded))
                                 .foregroundStyle(.white.opacity(0.56))
@@ -608,6 +622,40 @@ struct ContentView: View {
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .panelStyle(fill: Color.white.opacity(0.06))
+    }
+
+    private func layerAssignmentRow(layerName: String) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(layerName)
+                        .font(.system(size: 13, weight: .bold, design: .rounded))
+                        .foregroundStyle(.white)
+                    Text(viewModel.layerAssignmentSummary(for: layerName))
+                        .font(.system(size: 11, weight: .medium, design: .rounded))
+                        .foregroundStyle(viewModel.isLayerAssignmentHostable(layerName) ? .mint : .white.opacity(0.58))
+                }
+                Spacer()
+                if let loadedName = viewModel.standaloneLoadedLayerNames[layerName] {
+                    Text(loadedName)
+                        .font(.system(size: 11, weight: .bold, design: .rounded))
+                        .foregroundStyle(.white.opacity(0.76))
+                }
+            }
+
+            Picker("\(layerName) Instrument", selection: viewModel.layerInstrumentBinding(for: layerName)) {
+                Text("Unassigned").tag("")
+                ForEach(viewModel.layerInstrumentOptions(for: layerName)) { instrument in
+                    Text("\(instrument.name) · \(instrument.format.rawValue)").tag(instrument.id)
+                }
+            }
+            .pickerStyle(.menu)
+        }
+        .padding(12)
+        .background(
+            RoundedRectangle(cornerRadius: 18, style: .continuous)
+                .fill(Color.black.opacity(0.14))
+        )
     }
 
     private func actionButton(_ title: String, color: Color, action: @escaping () -> Void) -> some View {

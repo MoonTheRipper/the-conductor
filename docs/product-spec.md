@@ -45,10 +45,12 @@ Loop behavior:
 
 - discover installed Audio Units
 - host discovered Audio Unit instruments directly inside the app
+- allow separate AU assignments for `Strings`, `Brass`, `Woods`, and `Pulse`
 - discover installed VST/VST3 bundles from standard plugin folders
 - allow user-added library folders for sample sources
 - keep the selected target visible in the main control surface
 - label non-hostable targets clearly so discovery and playback status are not conflated
+- expose searchable catalog browsing so large plugin installs stay manageable
 
 ## Visual Language
 
@@ -61,7 +63,7 @@ Loop behavior:
 ## Next Milestones
 
 1. Tighten the live hand-tracking model so more than wrist position drives harmony.
-2. Add per-layer AU assignment so multiple hosted sounds can render together.
-3. Add multi-track MIDI export options and clip metadata.
-4. Improve beat-intent detection from the live camera path.
-5. Add sample-library playback behind the existing library-folder index.
+2. Improve beat-intent detection from the live camera path.
+3. Add sample-library playback behind the existing library-folder index.
+4. Add multi-track MIDI export options and clip metadata.
+5. Add per-layer effect or bus routing for richer standalone mixes.

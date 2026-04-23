@@ -6,11 +6,18 @@ import Foundation
 
 struct LibraryFolderDescriptor: Identifiable, Equatable {
     let path: String
+    let candidateFileCount: Int
 
     var id: String { path }
 
     var displayName: String {
         URL(fileURLWithPath: path).lastPathComponent
+    }
+
+    var summaryText: String {
+        candidateFileCount == 0
+            ? "No indexed sample or preset files yet"
+            : "\(candidateFileCount) indexed sample or preset files"
     }
 }
 
@@ -23,6 +30,10 @@ final class StandaloneInstrumentCatalogService: ObservableObject {
     private let defaultsKey = "TheConductor.libraryFolders"
     private let fileManager = FileManager.default
     private var audioUnitComponentsByID: [String: AVAudioUnitComponent] = [:]
+    private let libraryCandidateExtensions: Set<String> = [
+        "wav", "aif", "aiff", "caf", "mp3", "m4a",
+        "nki", "nkm", "exs", "sfz", "sf2", "aupreset",
+    ]
 
     init() {
         loadLibraryFolders()
@@ -33,7 +44,15 @@ final class StandaloneInstrumentCatalogService: ObservableObject {
         let audioUnits = discoverAudioUnits()
         let vsts = discoverFilesystemPlugins(format: .vst3, directories: vst3Directories, suffix: "vst3")
         let legacyVSTs = discoverFilesystemPlugins(format: .vst3, directories: vstDirectories, suffix: "vst")
-        let libraryDescriptors = libraryFolders.map {
+        let indexedLibraryFolders = libraryFolders.map { folder in
+            LibraryFolderDescriptor(
+                path: folder.path,
+                candidateFileCount: countLibraryCandidates(at: folder.path)
+            )
+        }
+        libraryFolders = indexedLibraryFolders
+
+        let libraryDescriptors = indexedLibraryFolders.map {
             InstrumentDescriptor(
                 id: "library-\($0.path)",
                 name: $0.displayName,
@@ -50,7 +69,8 @@ final class StandaloneInstrumentCatalogService: ObservableObject {
                 return lhs.name.localizedCaseInsensitiveCompare(rhs.name) == .orderedAscending
             }
 
-        statusText = "Discovered \(audioUnits.count) AU, \(vsts.count + legacyVSTs.count) VST, \(libraryDescriptors.count) library targets"
+        let indexedLibraryFiles = indexedLibraryFolders.reduce(0) { $0 + $1.candidateFileCount }
+        statusText = "Discovered \(audioUnits.count) AU, \(vsts.count + legacyVSTs.count) VST, \(libraryDescriptors.count) library targets · indexed \(indexedLibraryFiles) files"
     }
 
     func audioUnitDescription(for instrumentID: String) -> AudioComponentDescription? {
@@ -64,16 +84,30 @@ final class StandaloneInstrumentCatalogService: ObservableObject {
 
         switch instrument.format {
         case .audioUnit:
-            return "Hostable now in standalone mode"
+            return "Hostable now in standalone mode · \(audioUnitTypeLabel(for: instrumentID))"
         case .vst3:
             return "Discovered, but VST hosting is not implemented yet"
         case .sampleLibrary:
+            if let folder = libraryFolders.first(where: { "library-\($0.path)" == instrumentID }) {
+                return "\(folder.summaryText) · indexed for future sample hosting"
+            }
             return "Indexed for future sample hosting, but not directly playable yet"
         }
     }
 
     func isHostableAudioUnit(_ instrumentID: String) -> Bool {
         audioUnitComponentsByID[instrumentID] != nil
+    }
+
+    func catalogLine(for instrument: InstrumentDescriptor) -> String {
+        switch instrument.format {
+        case .audioUnit:
+            return "\(instrument.format.rawValue) · \(audioUnitTypeLabel(for: instrument.id)) · hostable now · \(instrument.source)"
+        case .vst3:
+            return "\(instrument.format.rawValue) · discovery only · \(instrument.source)"
+        case .sampleLibrary:
+            return "\(instrument.format.rawValue) · \(standaloneCapabilitySummary(for: instrument.id))"
+        }
     }
 
     func addLibraryFolder() {
@@ -92,7 +126,7 @@ final class StandaloneInstrumentCatalogService: ObservableObject {
                 return
             }
 
-            libraryFolders.append(LibraryFolderDescriptor(path: path))
+            libraryFolders.append(LibraryFolderDescriptor(path: path, candidateFileCount: 0))
             persistLibraryFolders()
             refresh()
         }
@@ -106,7 +140,7 @@ final class StandaloneInstrumentCatalogService: ObservableObject {
 
     private func loadLibraryFolders() {
         let storedPaths = UserDefaults.standard.stringArray(forKey: defaultsKey) ?? []
-        libraryFolders = storedPaths.map(LibraryFolderDescriptor.init(path:))
+        libraryFolders = storedPaths.map { LibraryFolderDescriptor(path: $0, candidateFileCount: 0) }
     }
 
     private func persistLibraryFolders() {
@@ -195,5 +229,41 @@ final class StandaloneInstrumentCatalogService: ObservableObject {
         let home = fileManager.homeDirectoryForCurrentUser
             .appendingPathComponent("Library/Audio/Plug-Ins/\(folderName)")
         return [local, home]
+    }
+
+    private func audioUnitTypeLabel(for instrumentID: String) -> String {
+        guard let component = audioUnitComponentsByID[instrumentID] else {
+            return "Audio Unit"
+        }
+
+        switch component.audioComponentDescription.componentType {
+        case kAudioUnitType_MusicDevice:
+            return "Music Device"
+        case kAudioUnitType_Generator:
+            return "Generator"
+        default:
+            return "Audio Unit"
+        }
+    }
+
+    private func countLibraryCandidates(at path: String) -> Int {
+        let url = URL(fileURLWithPath: path)
+        guard let enumerator = fileManager.enumerator(
+            at: url,
+            includingPropertiesForKeys: [.isRegularFileKey],
+            options: [.skipsHiddenFiles, .skipsPackageDescendants]
+        ) else {
+            return 0
+        }
+
+        var count = 0
+        for case let fileURL as URL in enumerator {
+            guard count < 5_000 else { break }
+            let fileExtension = fileURL.pathExtension.lowercased()
+            if libraryCandidateExtensions.contains(fileExtension) {
+                count += 1
+            }
+        }
+        return count
     }
 }

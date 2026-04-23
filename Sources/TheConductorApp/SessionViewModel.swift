@@ -44,6 +44,7 @@ final class SessionViewModel: ObservableObject {
             refreshCurrentInput()
         }
     }
+    @Published var instrumentSearchText = ""
     @Published var selectedInstrumentID = "" {
         didSet { handleSelectedInstrumentChange() }
     }
@@ -73,12 +74,14 @@ final class SessionViewModel: ObservableObject {
     @Published private(set) var standaloneHostStatusText = "Standalone host idle"
     @Published private(set) var standaloneSupportText = "No instrument selected"
     @Published private(set) var standaloneLoadedInstrumentName: String?
+    @Published private(set) var standaloneLoadedLayerNames: [String: String] = [:]
     @Published private(set) var isStandaloneEngineRunning = false
     @Published private(set) var isStandaloneInstrumentLoaded = false
     @Published private(set) var loopTransportStatusText = "No loop captured"
     @Published private(set) var exportStatusText = "No MIDI export yet"
     @Published private(set) var layerMixMultipliers: [String: Double]
     @Published private(set) var layerManualEnabled: [String: Bool]
+    @Published private(set) var layerAssignedInstrumentIDs: [String: String]
 
     private var engine: PerformanceEngine
     private var frameClock: TimeInterval = 0
@@ -96,6 +99,7 @@ final class SessionViewModel: ObservableObject {
     private static let calibrationDefaultsKey = "TheConductor.gestureCalibration"
     private static let layerMixDefaultsKey = "TheConductor.layerMixMultipliers"
     private static let layerEnabledDefaultsKey = "TheConductor.layerManualEnabled"
+    private static let layerAssignmentsDefaultsKey = "TheConductor.layerAssignedInstrumentIDs"
 
     init() {
         let engine = PerformanceEngine(keyCenter: .c)
@@ -107,6 +111,7 @@ final class SessionViewModel: ObservableObject {
         self.calibration = Self.loadCalibration()
         self.layerMixMultipliers = Self.loadLayerMixMultipliers()
         self.layerManualEnabled = Self.loadLayerManualEnabled()
+        self.layerAssignedInstrumentIDs = Self.loadLayerAssignments()
         bindLiveTracking()
         bindMIDIBridge()
         bindStandaloneCatalog()
@@ -115,6 +120,21 @@ final class SessionViewModel: ObservableObject {
 
     var selectedInstrument: InstrumentDescriptor? {
         availableInstruments.first { $0.id == selectedInstrumentID }
+    }
+
+    var filteredInstruments: [InstrumentDescriptor] {
+        let query = instrumentSearchText.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard query.isEmpty == false else { return availableInstruments }
+
+        return availableInstruments.filter { instrument in
+            instrument.name.localizedCaseInsensitiveContains(query) ||
+                instrument.source.localizedCaseInsensitiveContains(query) ||
+                instrument.format.rawValue.localizedCaseInsensitiveContains(query)
+        }
+    }
+
+    var browseInstrumentOptions: [InstrumentDescriptor] {
+        instrumentOptions(including: selectedInstrumentID)
     }
 
     var effectiveLayers: [LayerState] {
@@ -183,6 +203,13 @@ final class SessionViewModel: ObservableObject {
         standaloneCatalogService.isHostableAudioUnit(selectedInstrumentID)
     }
 
+    var standaloneLoadedLayerSummary: [String] {
+        PerformanceLayerPlanner.layerNames.compactMap { layerName in
+            guard let instrumentName = standaloneLoadedLayerNames[layerName] else { return nil }
+            return "\(layerName): \(instrumentName)"
+        }
+    }
+
     func binding<Value>(_ keyPath: WritableKeyPath<DebugGestureState, Value>) -> Binding<Value> {
         Binding(
             get: { self.debugState[keyPath: keyPath] },
@@ -223,6 +250,53 @@ final class SessionViewModel: ObservableObject {
                 self.persistLayerControls()
             }
         )
+    }
+
+    func layerInstrumentBinding(for layerName: String) -> Binding<String> {
+        Binding(
+            get: { self.layerAssignedInstrumentIDs[layerName] ?? "" },
+            set: { newValue in
+                self.layerAssignedInstrumentIDs[layerName] = newValue
+                self.persistLayerAssignments()
+                self.configureStandaloneSelection()
+            }
+        )
+    }
+
+    func instrumentOptions(including instrumentID: String? = nil) -> [InstrumentDescriptor] {
+        var instruments = filteredInstruments
+        if let instrumentID,
+           instruments.contains(where: { $0.id == instrumentID }) == false,
+           let selected = availableInstruments.first(where: { $0.id == instrumentID }) {
+            instruments.insert(selected, at: 0)
+        }
+        return instruments
+    }
+
+    func layerInstrumentOptions(for layerName: String) -> [InstrumentDescriptor] {
+        instrumentOptions(including: layerAssignedInstrumentIDs[layerName])
+    }
+
+    func currentLayerInstrument(for layerName: String) -> InstrumentDescriptor? {
+        let instrumentID = layerAssignedInstrumentIDs[layerName] ?? ""
+        return availableInstruments.first(where: { $0.id == instrumentID })
+    }
+
+    func layerAssignmentSummary(for layerName: String) -> String {
+        let instrumentID = layerAssignedInstrumentIDs[layerName] ?? ""
+        guard instrumentID.isEmpty == false else {
+            return "Unassigned"
+        }
+        return standaloneCatalogService.standaloneCapabilitySummary(for: instrumentID)
+    }
+
+    func isLayerAssignmentHostable(_ layerName: String) -> Bool {
+        let instrumentID = layerAssignedInstrumentIDs[layerName] ?? ""
+        return standaloneCatalogService.isHostableAudioUnit(instrumentID)
+    }
+
+    func instrumentCatalogLine(for instrument: InstrumentDescriptor) -> String {
+        standaloneCatalogService.catalogLine(for: instrument)
     }
 
     func startLiveTracking() {
@@ -279,6 +353,23 @@ final class SessionViewModel: ObservableObject {
         engine.clearLoopBuffer()
         performanceState = engine.state
         loopTransportStatusText = "Loop cleared"
+    }
+
+    func assignSelectedInstrumentToAllLayers() {
+        guard selectedInstrumentID.isEmpty == false else { return }
+        for layerName in PerformanceLayerPlanner.layerNames {
+            layerAssignedInstrumentIDs[layerName] = selectedInstrumentID
+        }
+        persistLayerAssignments()
+        configureStandaloneSelection()
+    }
+
+    func clearLayerAssignments() {
+        layerAssignedInstrumentIDs = Dictionary(
+            uniqueKeysWithValues: PerformanceLayerPlanner.layerNames.map { ($0, "") }
+        )
+        persistLayerAssignments()
+        configureStandaloneSelection()
     }
 
     func resetCalibration() {
@@ -409,9 +500,9 @@ final class SessionViewModel: ObservableObject {
                 self.availableInstruments = instruments
                 if instruments.contains(where: { $0.id == self.selectedInstrumentID }) == false {
                     self.selectedInstrumentID = instruments.first?.id ?? ""
-                } else {
-                    self.configureStandaloneSelection()
                 }
+                self.normalizeLayerAssignments()
+                self.configureStandaloneSelection()
             }
             .store(in: &cancellables)
 
@@ -447,6 +538,13 @@ final class SessionViewModel: ObservableObject {
             .receive(on: DispatchQueue.main)
             .sink { [weak self] loadedInstrumentName in
                 self?.standaloneLoadedInstrumentName = loadedInstrumentName
+            }
+            .store(in: &cancellables)
+
+        standaloneHostService.$loadedLayerNames
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] loadedLayerNames in
+                self?.standaloneLoadedLayerNames = loadedLayerNames
             }
             .store(in: &cancellables)
 
@@ -669,21 +767,35 @@ final class SessionViewModel: ObservableObject {
     }
 
     private func handleSelectedInstrumentChange() {
+        if layerAssignedInstrumentIDs.values.allSatisfy({ $0.isEmpty }) && selectedInstrumentID.isEmpty == false {
+            for layerName in PerformanceLayerPlanner.layerNames {
+                layerAssignedInstrumentIDs[layerName] = selectedInstrumentID
+            }
+            persistLayerAssignments()
+        }
         configureStandaloneSelection()
     }
 
     private func configureStandaloneSelection() {
-        let selectedInstrument = selectedInstrument
-        let audioUnitDescription = selectedInstrument.flatMap {
-            standaloneCatalogService.audioUnitDescription(for: $0.id)
-        }
-        let supportSummary = standaloneCatalogService.standaloneCapabilitySummary(for: selectedInstrumentID)
+        let selections = PerformanceLayerPlanner.layerNames.map { layerName in
+            let instrumentID = layerAssignedInstrumentIDs[layerName] ?? ""
+            let instrument = availableInstruments.first(where: { $0.id == instrumentID })
+            let audioUnitDescription = instrument.flatMap {
+                standaloneCatalogService.audioUnitDescription(for: $0.id)
+            }
+            let supportSummary = instrumentID.isEmpty
+                ? "No Audio Unit assigned"
+                : standaloneCatalogService.standaloneCapabilitySummary(for: instrumentID)
 
-        standaloneHostService.configureSelection(
-            instrument: selectedInstrument,
-            audioUnitDescription: audioUnitDescription,
-            capabilitySummary: supportSummary
-        )
+            return LayerHostedInstrumentSelection(
+                layerName: layerName,
+                instrument: instrument,
+                audioUnitDescription: audioUnitDescription,
+                capabilitySummary: supportSummary
+            )
+        }
+
+        standaloneHostService.configureAssignments(selections)
     }
 
     private func loopDuration(for loopBuffer: LoopBuffer) -> TimeInterval {
@@ -731,6 +843,10 @@ final class SessionViewModel: ObservableObject {
         UserDefaults.standard.set(layerManualEnabled, forKey: Self.layerEnabledDefaultsKey)
     }
 
+    private func persistLayerAssignments() {
+        UserDefaults.standard.set(layerAssignedInstrumentIDs, forKey: Self.layerAssignmentsDefaultsKey)
+    }
+
     private static func loadCalibration() -> GestureCalibration {
         guard
             let data = UserDefaults.standard.data(forKey: calibrationDefaultsKey),
@@ -754,6 +870,33 @@ final class SessionViewModel: ObservableObject {
         let stored = UserDefaults.standard.dictionary(forKey: layerEnabledDefaultsKey) as? [String: Bool] ?? [:]
         merged.merge(stored) { _, stored in stored }
         return merged
+    }
+
+    private static func loadLayerAssignments() -> [String: String] {
+        var merged = Dictionary(
+            uniqueKeysWithValues: PerformanceLayerPlanner.layerNames.map { ($0, "") }
+        )
+        let stored = UserDefaults.standard.dictionary(forKey: layerAssignmentsDefaultsKey) as? [String: String] ?? [:]
+        merged.merge(stored) { _, stored in stored }
+        return merged
+    }
+
+    private func normalizeLayerAssignments() {
+        let validIDs = Set(availableInstruments.map(\.id))
+        for layerName in PerformanceLayerPlanner.layerNames {
+            let assignedInstrumentID = layerAssignedInstrumentIDs[layerName] ?? ""
+            if assignedInstrumentID.isEmpty == false, validIDs.contains(assignedInstrumentID) == false {
+                layerAssignedInstrumentIDs[layerName] = ""
+            }
+        }
+
+        if layerAssignedInstrumentIDs.values.allSatisfy({ $0.isEmpty }), selectedInstrumentID.isEmpty == false {
+            for layerName in PerformanceLayerPlanner.layerNames {
+                layerAssignedInstrumentIDs[layerName] = selectedInstrumentID
+            }
+        }
+
+        persistLayerAssignments()
     }
 
     private static var defaultLayerMixMultipliers: [String: Double] {

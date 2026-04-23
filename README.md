@@ -27,11 +27,12 @@ The current app is a high-value scaffold, not the final audio app yet. It alread
 - live hand-tracking integration shape through Vision and AVFoundation
 - Core MIDI routing into Logic through a virtual source and optional direct destination send
 - real standalone instrument discovery for AU, VST/VST3, and user-added library folders
-- direct standalone Audio Unit playback for the currently selected AU target
+- direct standalone Audio Unit playback with one AU assignment per orchestration layer
 - timestamp-accurate loop replay based on captured gesture commits
 - manual orchestration trims on top of the auto-generated layer mix
 - calibration controls for camera-centered gesture remapping
 - MIDI export for the captured loop phrase
+- searchable instrument catalog and indexed library-folder summaries
 
 ## Current Product Modes
 
@@ -51,8 +52,10 @@ The current standalone catalog implementation exposes:
 - VST/VST3 discovery from standard macOS plugin folders
 - user-added sample/library folders inside the app UI
 - live target selection from the discovered catalog
-- direct Audio Unit hosting for discovered AU instrument entries
+- per-layer Audio Unit hosting for discovered AU instrument entries
 - panic/all-notes-off control for standalone playback
+- searchable instrument browsing and assign-selected-to-all flow
+- indexed sample/library folder summaries so future sample hosting has useful source context
 
 The current loop and control implementation exposes:
 
@@ -84,7 +87,7 @@ sudo xcodebuild -runFirstLaunch
 ## Near-Term Build Order
 
 1. Tighten live hand gesture extraction beyond wrist-position tracking.
-2. Add per-layer standalone instrument assignment so multiple AU sounds can play at once.
-3. Add richer live gesture inference for hand openness, orientation, and beat intent.
+2. Add richer live gesture inference for hand openness, orientation, and beat intent.
+3. Add sample-library playback behind the indexed library folders.
 4. Add multi-track MIDI export with reusable tempo/clip metadata.
 5. Move the audio/plugin core behind a portable C++ layer for cross-platform builds.

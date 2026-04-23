@@ -16,8 +16,16 @@ enum PerformanceLayerPlanner {
         ("Pulse", 3),
     ]
 
+    static var layerNames: [String] {
+        layerChannels.map(\.name)
+    }
+
     static var channelMapDescription: [String] {
         layerChannels.map { "\($0.name) -> MIDI ch \($0.channel + 1)" }
+    }
+
+    static func channel(for layerName: String) -> UInt8? {
+        layerChannels.first(where: { $0.name == layerName })?.channel
     }
 
     static func payloads(

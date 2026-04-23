@@ -35,8 +35,9 @@ Native macOS presentation shell:
 - persistent gesture calibration remapping on top of raw tracking input
 - Core MIDI bridge with virtual source and direct destination routing
 - standalone instrument catalog discovery for AU, VST/VST3, and library folders
-- standalone Audio Unit host service for direct local playback
+- standalone Audio Unit host service for direct local playback with per-layer assignment
 - loop transport and MIDI export controls in the desktop shell
+- searchable catalog UI and indexed library summaries for future sample hosting
 
 ## Planned Integrations
 

@@ -281,8 +281,12 @@ struct ContentView: View {
 
     private var instrumentPanel: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Text("Instrument Targets")
-                .sectionTitle()
+            HStack {
+                Text("Instrument Targets")
+                    .sectionTitle()
+                Spacer()
+                actionButton("Refresh", color: .cyan, action: viewModel.refreshStandaloneInstruments)
+            }
 
             Picker("Instrument", selection: $viewModel.selectedInstrumentID) {
                 ForEach(viewModel.availableInstruments) { instrument in
@@ -290,6 +294,10 @@ struct ContentView: View {
                 }
             }
             .pickerStyle(.menu)
+
+            Text(viewModel.instrumentCatalogStatusText)
+                .font(.system(size: 12, weight: .medium, design: .rounded))
+                .foregroundStyle(.white.opacity(0.68))
 
             ForEach(viewModel.availableInstruments) { instrument in
                 HStack(alignment: .top, spacing: 12) {
@@ -305,6 +313,50 @@ struct ContentView: View {
                         Text("\(instrument.format.rawValue) · \(instrument.source)")
                             .font(.system(size: 12, weight: .medium, design: .rounded))
                             .foregroundStyle(.white.opacity(0.62))
+                    }
+                }
+            }
+
+            Divider()
+                .overlay(Color.white.opacity(0.08))
+
+            HStack {
+                Text("Library Folders")
+                    .font(.system(size: 14, weight: .bold, design: .rounded))
+                    .foregroundStyle(.white)
+                Spacer()
+                actionButton("Add Folder", color: .mint, action: viewModel.addLibraryFolder)
+            }
+
+            if viewModel.libraryFolders.isEmpty {
+                Text("No library folders added yet.")
+                    .font(.system(size: 12, weight: .medium, design: .rounded))
+                    .foregroundStyle(.white.opacity(0.56))
+            } else {
+                ForEach(viewModel.libraryFolders) { folder in
+                    HStack(alignment: .top, spacing: 12) {
+                        Circle()
+                            .fill(Color.cyan.opacity(0.8))
+                            .frame(width: 10, height: 10)
+                            .padding(.top, 4)
+
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(folder.displayName)
+                                .font(.system(size: 13, weight: .semibold, design: .rounded))
+                                .foregroundStyle(.white)
+                            Text(folder.path)
+                                .font(.system(size: 11, weight: .medium, design: .rounded))
+                                .foregroundStyle(.white.opacity(0.56))
+                        }
+
+                        Spacer()
+
+                        Button("Remove") {
+                            viewModel.removeLibraryFolder(id: folder.id)
+                        }
+                        .buttonStyle(.borderless)
+                        .font(.system(size: 11, weight: .bold, design: .rounded))
+                        .foregroundStyle(.red.opacity(0.88))
                     }
                 }
             }

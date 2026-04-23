@@ -33,6 +33,7 @@ Native macOS presentation shell:
 - debug gesture simulator for deterministic tuning
 - Vision + AVFoundation live hand-tracking path
 - Core MIDI bridge with virtual source and direct destination routing
+- standalone instrument catalog discovery for AU, VST/VST3, and library folders
 
 ## Planned Integrations
 
@@ -52,6 +53,8 @@ Future parity backend:
 macOS first:
 
 - `Core MIDI` virtual sources and destinations
+- Audio Unit discovery
+- VST/VST3 filesystem discovery
 - Audio Unit discovery/hosting
 - Logic Bridge layer routing orchestration channels into the DAW
 

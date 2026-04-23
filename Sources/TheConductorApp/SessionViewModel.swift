@@ -44,7 +44,7 @@ final class SessionViewModel: ObservableObject {
             refreshCurrentInput()
         }
     }
-    @Published var selectedInstrumentID: String
+    @Published var selectedInstrumentID = ""
     @Published private(set) var midiDestinations: [MIDIDestinationDescriptor] = []
     @Published private(set) var midiStatusText = "MIDI bridge ready"
     @Published var selectedMIDIDestinationID = LogicMIDIBridgeService.noDestinationID {
@@ -59,13 +59,15 @@ final class SessionViewModel: ObservableObject {
             midiBridgeService.sendToVirtualSource = sendToVirtualMIDISource
         }
     }
-
-    let availableInstruments: [InstrumentDescriptor]
+    @Published private(set) var availableInstruments: [InstrumentDescriptor] = []
+    @Published private(set) var libraryFolders: [LibraryFolderDescriptor] = []
+    @Published private(set) var instrumentCatalogStatusText = "Standalone catalog idle"
 
     private var engine: PerformanceEngine
     private var frameClock: TimeInterval = 0
     private let liveTrackingService = VisionHandTrackingService()
     private let midiBridgeService = LogicMIDIBridgeService()
+    private let standaloneCatalogService = StandaloneInstrumentCatalogService()
     private var cancellables = Set<AnyCancellable>()
     private var loopPlaybackTimer: Timer?
     private var loopPlaybackIndex = 0
@@ -77,10 +79,9 @@ final class SessionViewModel: ObservableObject {
         self.chordLabels = engine.harmonyEngine.chordLabels
         self.intervalLabels = engine.harmonyEngine.intervalLabels
         self.debugState = .seed
-        self.availableInstruments = DemoInstrumentCatalog().availableInstruments()
-        self.selectedInstrumentID = self.availableInstruments.first?.id ?? ""
         bindLiveTracking()
         bindMIDIBridge()
+        bindStandaloneCatalog()
         refreshFromDebugGesture()
     }
 
@@ -161,6 +162,18 @@ final class SessionViewModel: ObservableObject {
 
     func silenceMIDINotes() {
         midiBridgeService.silenceAllNotes()
+    }
+
+    func refreshStandaloneInstruments() {
+        standaloneCatalogService.refresh()
+    }
+
+    func addLibraryFolder() {
+        standaloneCatalogService.addLibraryFolder()
+    }
+
+    func removeLibraryFolder(id: String) {
+        standaloneCatalogService.removeLibraryFolder(id: id)
     }
 
     func pulseCommit() {
@@ -261,6 +274,33 @@ final class SessionViewModel: ObservableObject {
             .receive(on: DispatchQueue.main)
             .sink { [weak self] sendToVirtualSource in
                 self?.sendToVirtualMIDISource = sendToVirtualSource
+            }
+            .store(in: &cancellables)
+    }
+
+    private func bindStandaloneCatalog() {
+        standaloneCatalogService.$instruments
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] instruments in
+                guard let self else { return }
+                self.availableInstruments = instruments
+                if instruments.contains(where: { $0.id == self.selectedInstrumentID }) == false {
+                    self.selectedInstrumentID = instruments.first?.id ?? ""
+                }
+            }
+            .store(in: &cancellables)
+
+        standaloneCatalogService.$libraryFolders
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] libraryFolders in
+                self?.libraryFolders = libraryFolders
+            }
+            .store(in: &cancellables)
+
+        standaloneCatalogService.$statusText
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] statusText in
+                self?.instrumentCatalogStatusText = statusText
             }
             .store(in: &cancellables)
     }

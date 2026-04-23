@@ -40,6 +40,13 @@ Loop behavior:
 - maintain musically sensible orchestration layers
 - keep room for exported MIDI and DAW handoff
 
+## Standalone Sound Sources
+
+- discover installed Audio Units
+- discover installed VST/VST3 bundles from standard plugin folders
+- allow user-added library folders for sample sources
+- keep the selected target visible in the main control surface
+
 ## Visual Language
 
 - large performance surface
@@ -50,6 +57,6 @@ Loop behavior:
 ## Next Milestones
 
 1. Tighten the live hand-tracking model so more than wrist position drives harmony.
-2. Add AU/VST3 browsing and standalone instrument hosting.
+2. Add AU/VST3 standalone hosting behind the discovered catalog.
 3. Add a progression recorder/exporter.
 4. Replace average-step loop playback with captured timing data.

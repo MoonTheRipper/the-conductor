@@ -18,35 +18,69 @@ struct PerformanceEngineTests {
     func loopGestureStartsAndClosesPlayback() {
         var engine = PerformanceEngine(keyCenter: .c)
 
-        engine.handle(snapshot: snapshot(leftPinch: 0.95, rightPinch: 0.95, timestamp: 0.0))
-        engine.handle(snapshot: snapshot(
+        let startEvents = engine.handle(snapshot: snapshot(leftPinch: 0.95, rightPinch: 0.95, timestamp: 0.0))
+        let commitEvents = engine.handle(snapshot: snapshot(
             leftPosition: SIMD2<Double>(-0.4, 0.1),
             rightPosition: SIMD2<Double>(0, -1),
             leftPinch: 0.18,
             rightPinch: 0.94,
             timestamp: 1.0
         ))
-        engine.handle(snapshot: snapshot(leftPinch: 0.95, rightPinch: 0.95, timestamp: 2.0))
+        let stopEvents = engine.handle(snapshot: snapshot(leftPinch: 0.95, rightPinch: 0.95, timestamp: 2.0))
 
         #expect(engine.state.loopBuffer.isRecording == false)
         #expect(engine.state.loopBuffer.isPlaying)
         #expect(engine.state.loopBuffer.phrase.count == 1)
+        #expect(startEvents.contains {
+            if case .loopStateChanged = $0 { return true }
+            return false
+        })
+        #expect(commitEvents.contains {
+            if case .chordCommitted = $0 { return true }
+            return false
+        })
+        #expect(stopEvents.contains {
+            if case .loopStateChanged = $0 { return true }
+            return false
+        })
     }
 
     @Test
     func closedPinchedRightHandStopsPerformance() {
         var engine = PerformanceEngine(keyCenter: .c)
 
-        engine.handle(snapshot: snapshot(rightPinch: 0.94, timestamp: 0.0))
+        _ = engine.handle(snapshot: snapshot(rightPinch: 0.94, timestamp: 0.0))
         #expect(engine.state.isPerforming)
 
-        engine.handle(snapshot: snapshot(
+        let stopEvents = engine.handle(snapshot: snapshot(
             rightPinch: 0.80,
             rightOpenness: HandOpenness.closed,
             timestamp: 1.0
         ))
 
         #expect(engine.state.isPerforming == false)
+        #expect(stopEvents.contains {
+            if case .transportChanged(isPerforming: false, _) = $0 { return true }
+            return false
+        })
+    }
+
+    @Test
+    func commitProducesChordEvent() {
+        var engine = PerformanceEngine(keyCenter: .c)
+
+        let events = engine.handle(snapshot: snapshot(
+            rightPosition: SIMD2<Double>(0.42, -0.12),
+            rightPinch: 0.95,
+            timestamp: 0.0
+        ))
+
+        #expect(events.contains {
+            if case .chordCommitted(let chord, _, _, _) = $0 {
+                return chord.symbol == engine.state.currentChord.symbol
+            }
+            return false
+        })
     }
 
     private func snapshot(

@@ -242,6 +242,23 @@ public struct LoopBuffer: Equatable, Sendable {
     }
 }
 
+public enum PerformanceEvent: Equatable, Sendable {
+    case chordCommitted(
+        chord: ChordSelection,
+        interval: IntervalChoice,
+        dynamics: Double,
+        timestamp: TimeInterval
+    )
+    case transportChanged(
+        isPerforming: Bool,
+        timestamp: TimeInterval
+    )
+    case loopStateChanged(
+        loopBuffer: LoopBuffer,
+        timestamp: TimeInterval
+    )
+}
+
 public struct LayerState: Identifiable, Equatable, Sendable {
     public var name: String
     public var mix: Double

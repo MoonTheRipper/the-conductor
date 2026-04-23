@@ -31,6 +31,7 @@ Loop behavior:
 - first toggle starts recording
 - second toggle closes the loop and starts playback
 - third toggle clears the loop
+- when Logic Bridge mode is active, loop playback is emitted back to MIDI channels
 
 ## Harmony Engine Goals
 
@@ -48,7 +49,7 @@ Loop behavior:
 
 ## Next Milestones
 
-1. Replace debug controls with live camera tracking.
-2. Add Core MIDI output and Logic Bridge mode.
-3. Add AU/VST3 browsing and standalone instrument hosting.
-4. Add a progression recorder/exporter.
+1. Tighten the live hand-tracking model so more than wrist position drives harmony.
+2. Add AU/VST3 browsing and standalone instrument hosting.
+3. Add a progression recorder/exporter.
+4. Replace average-step loop playback with captured timing data.

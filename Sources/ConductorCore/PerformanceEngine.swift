@@ -40,12 +40,14 @@ public struct PerformanceEngine: Sendable {
         state.activityText = "Key center set to \(keyCenter.displayName)"
     }
 
-    public mutating func handle(snapshot: GestureSnapshot) {
+    public mutating func handle(snapshot: GestureSnapshot) -> [PerformanceEvent] {
+        var events: [PerformanceEvent] = []
         updatePreviewState(with: snapshot)
-        handleLoopToggle(with: snapshot)
-        handleTransport(with: snapshot)
-        handleCommit(with: snapshot)
+        events.append(contentsOf: handleLoopToggle(with: snapshot))
+        events.append(contentsOf: handleTransport(with: snapshot))
+        events.append(contentsOf: handleCommit(with: snapshot))
         updateLayers(with: snapshot)
+        return events
     }
 
     private mutating func updatePreviewState(with snapshot: GestureSnapshot) {
@@ -66,7 +68,7 @@ public struct PerformanceEngine: Sendable {
         }
     }
 
-    private mutating func handleLoopToggle(with snapshot: GestureSnapshot) {
+    private mutating func handleLoopToggle(with snapshot: GestureSnapshot) -> [PerformanceEvent] {
         guard
             let leftHand = snapshot.leftHand,
             let rightHand = snapshot.rightHand,
@@ -74,7 +76,7 @@ public struct PerformanceEngine: Sendable {
             rightHand.pinch > 0.88,
             snapshot.timestamp - lastLoopToggleTimestamp > 0.45
         else {
-            return
+            return []
         }
 
         if state.loopBuffer.isRecording == false && state.loopBuffer.isPlaying == false {
@@ -99,39 +101,53 @@ public struct PerformanceEngine: Sendable {
         }
 
         lastLoopToggleTimestamp = snapshot.timestamp
+        return [
+            .loopStateChanged(loopBuffer: state.loopBuffer, timestamp: snapshot.timestamp),
+        ]
     }
 
-    private mutating func handleTransport(with snapshot: GestureSnapshot) {
+    private mutating func handleTransport(with snapshot: GestureSnapshot) -> [PerformanceEvent] {
         guard
             let rightHand = snapshot.rightHand,
             snapshot.timestamp - lastTransportTimestamp > 0.35
         else {
-            return
+            return []
         }
 
         if rightHand.openness == .open && rightHand.verticalVelocity < -0.72 {
+            let wasPerforming = state.isPerforming
             state.isPerforming = true
             state.activityText = "Ensemble engaged"
             lastTransportTimestamp = snapshot.timestamp
-            return
+            return wasPerforming ? [] : [
+                .transportChanged(isPerforming: true, timestamp: snapshot.timestamp),
+            ]
         }
 
         if rightHand.openness == .closed && rightHand.pinch > 0.55 {
+            let wasPerforming = state.isPerforming
             state.isPerforming = false
             state.activityText = "Ensemble muted"
             lastTransportTimestamp = snapshot.timestamp
+            return wasPerforming ? [
+                .transportChanged(isPerforming: false, timestamp: snapshot.timestamp),
+            ] : []
         }
+
+        return []
     }
 
-    private mutating func handleCommit(with snapshot: GestureSnapshot) {
+    private mutating func handleCommit(with snapshot: GestureSnapshot) -> [PerformanceEvent] {
         guard
             let rightHand = snapshot.rightHand,
             rightHand.pinch > 0.82,
             snapshot.timestamp - lastCommitTimestamp > 0.25
         else {
-            return
+            return []
         }
 
+        var events: [PerformanceEvent] = []
+        let wasPerforming = state.isPerforming
         state.currentChord = state.previewChord
         state.isPerforming = true
 
@@ -141,6 +157,18 @@ public struct PerformanceEngine: Sendable {
 
         state.activityText = "Committed \(state.currentChord.symbol) with \(state.interval.spokenName.lowercased()) focus"
         lastCommitTimestamp = snapshot.timestamp
+        if wasPerforming == false {
+            events.append(.transportChanged(isPerforming: true, timestamp: snapshot.timestamp))
+        }
+        events.append(
+            .chordCommitted(
+                chord: state.currentChord,
+                interval: state.interval,
+                dynamics: state.dynamics,
+                timestamp: snapshot.timestamp
+            )
+        )
+        return events
     }
 
     private mutating func updateLayers(with snapshot: GestureSnapshot) {

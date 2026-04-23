@@ -32,6 +32,9 @@ struct ContentView: View {
             VStack(alignment: .leading, spacing: 18) {
                 titlePanel
                 routingPanel
+                if viewModel.routingMode == .logicBridge {
+                    logicBridgePanel
+                }
                 orchestraPanel
                 trackingPanel
                 instrumentPanel
@@ -91,6 +94,61 @@ struct ContentView: View {
             }
         }
         .panelStyle(fill: Color(red: 0.10, green: 0.17, blue: 0.16).opacity(0.55))
+    }
+
+    private var logicBridgePanel: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            HStack {
+                Text("Logic Bridge")
+                    .sectionTitle()
+                Spacer()
+                actionButton("Refresh MIDI", color: .cyan, action: viewModel.refreshMIDIDestinations)
+            }
+
+            VStack(alignment: .leading, spacing: 8) {
+                Text("Virtual Source")
+                    .font(.system(size: 12, weight: .bold, design: .rounded))
+                    .foregroundStyle(.white.opacity(0.58))
+                Text(viewModel.virtualMIDISourceName)
+                    .font(.system(size: 14, weight: .semibold, design: .rounded))
+                    .foregroundStyle(.white)
+            }
+
+            Toggle(isOn: $viewModel.sendToVirtualMIDISource) {
+                Text("Publish virtual MIDI source")
+                    .font(.system(size: 13, weight: .semibold, design: .rounded))
+                    .foregroundStyle(.white)
+            }
+            .toggleStyle(.switch)
+
+            Picker("Direct Destination", selection: $viewModel.selectedMIDIDestinationID) {
+                Text("None").tag(LogicMIDIBridgeService.noDestinationID)
+                ForEach(viewModel.midiDestinations) { destination in
+                    Text(destination.isLikelyLogicInput ? "\(destination.name) · Logic" : destination.name)
+                        .tag(destination.id)
+                }
+            }
+            .pickerStyle(.menu)
+
+            Text(viewModel.midiStatusText)
+                .font(.system(size: 12, weight: .medium, design: .rounded))
+                .foregroundStyle(.white.opacity(0.72))
+
+            VStack(alignment: .leading, spacing: 6) {
+                Text("Layer channels")
+                    .font(.system(size: 12, weight: .bold, design: .rounded))
+                    .foregroundStyle(.white.opacity(0.58))
+
+                ForEach(viewModel.midiChannelMapDescription, id: \.self) { line in
+                    Text(line)
+                        .font(.system(size: 12, weight: .medium, design: .rounded))
+                        .foregroundStyle(.white.opacity(0.72))
+                }
+            }
+
+            actionButton("All Notes Off", color: .red, action: viewModel.silenceMIDINotes)
+        }
+        .panelStyle(fill: Color(red: 0.12, green: 0.08, blue: 0.17).opacity(0.56))
     }
 
     private var orchestraPanel: some View {

@@ -32,6 +32,7 @@ Native macOS presentation shell:
 - routing and instrument selection controls
 - debug gesture simulator for deterministic tuning
 - Vision + AVFoundation live hand-tracking path
+- Core MIDI bridge with virtual source and direct destination routing
 
 ## Planned Integrations
 
@@ -52,6 +53,7 @@ macOS first:
 
 - `Core MIDI` virtual sources and destinations
 - Audio Unit discovery/hosting
+- Logic Bridge layer routing orchestration channels into the DAW
 
 Cross-platform expansion:
 

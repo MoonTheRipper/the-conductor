@@ -1,3 +1,5 @@
+import AVFoundation
+import Combine
 import ConductorCore
 import SwiftUI
 import simd
@@ -19,18 +21,25 @@ struct DebugGestureState: Equatable {
 @MainActor
 final class SessionViewModel: ObservableObject {
     @Published var debugState: DebugGestureState {
-        didSet { refreshFromDebugGesture() }
+        didSet {
+            if trackingMode == .simulator {
+                refreshFromDebugGesture()
+            }
+        }
     }
 
     @Published private(set) var performanceState: PerformanceState
     @Published private(set) var chordLabels: [String]
     @Published private(set) var intervalLabels: [String]
+    @Published var trackingMode: TrackingMode = .simulator {
+        didSet { handleTrackingModeChange() }
+    }
     @Published var routingMode: RoutingMode = .standaloneHost
     @Published var keyCenter: PitchClass = .c {
         didSet {
             engine.setKeyCenter(keyCenter)
             chordLabels = engine.harmonyEngine.chordLabels
-            refreshFromDebugGesture()
+            refreshCurrentInput()
         }
     }
     @Published var selectedInstrumentID: String
@@ -39,6 +48,8 @@ final class SessionViewModel: ObservableObject {
 
     private var engine: PerformanceEngine
     private var frameClock: TimeInterval = 0
+    private let liveTrackingService = VisionHandTrackingService()
+    private var cancellables = Set<AnyCancellable>()
 
     init() {
         let engine = PerformanceEngine(keyCenter: .c)
@@ -49,6 +60,7 @@ final class SessionViewModel: ObservableObject {
         self.debugState = .seed
         self.availableInstruments = DemoInstrumentCatalog().availableInstruments()
         self.selectedInstrumentID = self.availableInstruments.first?.id ?? ""
+        bindLiveTracking()
         refreshFromDebugGesture()
     }
 
@@ -65,6 +77,37 @@ final class SessionViewModel: ObservableObject {
         }
     }
 
+    var liveTrackingStatusText: String {
+        liveTrackingService.statusText
+    }
+
+    var cameraAuthorizationStatusText: String {
+        switch liveTrackingService.authorizationStatus {
+        case .authorized:
+            return liveTrackingService.isRunning ? "Authorized and running" : "Authorized"
+        case .denied:
+            return "Denied"
+        case .restricted:
+            return "Restricted"
+        case .notDetermined:
+            return "Not requested"
+        @unknown default:
+            return "Unknown"
+        }
+    }
+
+    var captureSession: AVCaptureSession {
+        liveTrackingService.captureSession
+    }
+
+    var isLiveTracking: Bool {
+        trackingMode == .liveCamera
+    }
+
+    var isCameraRunning: Bool {
+        liveTrackingService.isRunning
+    }
+
     func binding<Value>(_ keyPath: WritableKeyPath<DebugGestureState, Value>) -> Binding<Value> {
         Binding(
             get: { self.debugState[keyPath: keyPath] },
@@ -74,6 +117,14 @@ final class SessionViewModel: ObservableObject {
                 self.debugState = copy
             }
         )
+    }
+
+    func startLiveTracking() {
+        liveTrackingService.start()
+    }
+
+    func stopLiveTracking() {
+        liveTrackingService.stop()
     }
 
     func pulseCommit() {
@@ -126,6 +177,8 @@ final class SessionViewModel: ObservableObject {
         engage: (inout DebugGestureState) -> Void,
         release: (inout DebugGestureState) -> Void
     ) {
+        guard trackingMode == .simulator else { return }
+
         var onState = debugState
         engage(&onState)
         debugState = onState
@@ -135,7 +188,43 @@ final class SessionViewModel: ObservableObject {
         debugState = offState
     }
 
+    private func bindLiveTracking() {
+        liveTrackingService.$latestSnapshot
+            .compactMap { $0 }
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] snapshot in
+                guard let self, self.trackingMode == .liveCamera else { return }
+                self.engine.handle(snapshot: snapshot)
+                self.performanceState = self.engine.state
+            }
+            .store(in: &cancellables)
+    }
+
+    private func handleTrackingModeChange() {
+        switch trackingMode {
+        case .simulator:
+            liveTrackingService.stop()
+            refreshFromDebugGesture()
+        case .liveCamera:
+            performanceState.activityText = "Live camera ready"
+        }
+    }
+
+    private func refreshCurrentInput() {
+        switch trackingMode {
+        case .simulator:
+            refreshFromDebugGesture()
+        case .liveCamera:
+            if let snapshot = liveTrackingService.latestSnapshot {
+                engine.handle(snapshot: snapshot)
+                performanceState = engine.state
+            }
+        }
+    }
+
     private func refreshFromDebugGesture() {
+        guard trackingMode == .simulator else { return }
+
         frameClock += 0.12
 
         let snapshot = GestureSnapshot(

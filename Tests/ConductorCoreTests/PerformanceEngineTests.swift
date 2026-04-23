@@ -1,4 +1,5 @@
 import ConductorCore
+import Foundation
 import Testing
 import simd
 
@@ -41,7 +42,7 @@ struct PerformanceEngineTests {
 
         engine.handle(snapshot: snapshot(
             rightPinch: 0.80,
-            rightOpenness: .closed,
+            rightOpenness: HandOpenness.closed,
             timestamp: 1.0
         ))
 

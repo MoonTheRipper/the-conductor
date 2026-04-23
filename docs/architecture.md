@@ -30,7 +30,8 @@ Native macOS presentation shell:
 - SwiftUI desktop surface
 - chord and interval orbit visualization
 - routing and instrument selection controls
-- debug gesture simulator for fast iteration before camera input is wired
+- debug gesture simulator for deterministic tuning
+- Vision + AVFoundation live hand-tracking path
 
 ## Planned Integrations
 

@@ -33,7 +33,7 @@ struct ContentView: View {
                 titlePanel
                 routingPanel
                 orchestraPanel
-                gesturePanel
+                trackingPanel
                 instrumentPanel
             }
             .padding(.vertical, 2)
@@ -55,6 +55,7 @@ struct ContentView: View {
                 statusChip(title: viewModel.performanceState.isPerforming ? "Live" : "Standby", color: .mint)
                 statusChip(title: viewModel.performanceState.loopBuffer.statusLabel, color: .orange)
                 statusChip(title: viewModel.routingMode.rawValue, color: .cyan)
+                statusChip(title: viewModel.trackingMode.rawValue, color: .yellow)
             }
         }
         .panelStyle(fill: Color.white.opacity(0.07))
@@ -126,18 +127,34 @@ struct ContentView: View {
         .panelStyle(fill: Color(red: 0.20, green: 0.11, blue: 0.06).opacity(0.48))
     }
 
-    private var gesturePanel: some View {
+    private var trackingPanel: some View {
         VStack(alignment: .leading, spacing: 16) {
-            HStack {
-                Text("Gesture Simulator")
-                    .sectionTitle()
-                Spacer()
-                HStack(spacing: 8) {
-                    actionButton("Downbeat", color: .mint, action: viewModel.pulseDownbeat)
-                    actionButton("Commit", color: .orange, action: viewModel.pulseCommit)
-                    actionButton("Loop", color: .cyan, action: viewModel.pulseLoopToggle)
-                    actionButton("Stop", color: .red, action: viewModel.pulseStop)
+            Text("Tracking")
+                .sectionTitle()
+
+            Picker("Input", selection: $viewModel.trackingMode) {
+                ForEach(TrackingMode.allCases) { mode in
+                    Text(mode.rawValue).tag(mode)
                 }
+            }
+            .pickerStyle(.segmented)
+
+            if viewModel.isLiveTracking {
+                liveTrackingPanel
+            } else {
+                simulatorPanel
+            }
+        }
+        .panelStyle(fill: Color(red: 0.08, green: 0.14, blue: 0.22).opacity(0.56))
+    }
+
+    private var simulatorPanel: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            HStack(spacing: 8) {
+                actionButton("Downbeat", color: .mint, action: viewModel.pulseDownbeat)
+                actionButton("Commit", color: .orange, action: viewModel.pulseCommit)
+                actionButton("Loop", color: .cyan, action: viewModel.pulseLoopToggle)
+                actionButton("Stop", color: .red, action: viewModel.pulseStop)
             }
 
             handEditor(
@@ -158,7 +175,50 @@ struct ContentView: View {
                 openness: viewModel.binding(\.rightOpenness)
             )
         }
-        .panelStyle(fill: Color(red: 0.08, green: 0.14, blue: 0.22).opacity(0.56))
+    }
+
+    private var liveTrackingPanel: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack {
+                Text("Authorization")
+                    .font(.system(size: 13, weight: .semibold, design: .rounded))
+                    .foregroundStyle(.white.opacity(0.72))
+                Spacer()
+                Text(viewModel.cameraAuthorizationStatusText)
+                    .font(.system(size: 13, weight: .bold, design: .rounded))
+                    .foregroundStyle(.white)
+            }
+
+            Text(viewModel.liveTrackingStatusText)
+                .font(.system(size: 14, weight: .semibold, design: .rounded))
+                .foregroundStyle(.white.opacity(0.88))
+
+            HStack(spacing: 10) {
+                actionButton("Start Camera", color: .mint, action: viewModel.startLiveTracking)
+                actionButton("Stop Camera", color: .red, action: viewModel.stopLiveTracking)
+            }
+
+            Text("Live mode feeds Vision hand-pose observations into the same harmonic engine used by the simulator. Keep the simulator for deterministic tuning and use the camera path to validate real gestures.")
+                .font(.system(size: 12, weight: .medium, design: .rounded))
+                .foregroundStyle(.white.opacity(0.64))
+
+            Text("Gesture vocabulary")
+                .font(.system(size: 14, weight: .bold, design: .rounded))
+                .foregroundStyle(.white)
+
+            VStack(alignment: .leading, spacing: 6) {
+                liveTip("Right-hand wrist position previews chord direction.")
+                liveTip("Right-hand pinch commits the previewed chord.")
+                liveTip("Fast open-handed downbeat engages the ensemble.")
+                liveTip("Both hands pinched toggles loop capture.")
+                liveTip("Left-hand position selects interval focus.")
+            }
+        }
+        .padding(16)
+        .background(
+            RoundedRectangle(cornerRadius: 20, style: .continuous)
+                .fill(Color.black.opacity(0.14))
+        )
     }
 
     private var instrumentPanel: some View {
@@ -225,6 +285,32 @@ struct ContentView: View {
                     accent: Color.cyan
                 )
             }
+
+            if viewModel.isLiveTracking {
+                liveCameraStage
+            }
+        }
+    }
+
+    private var liveCameraStage: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack {
+                Text("Camera Feed")
+                    .font(.system(size: 18, weight: .bold, design: .rounded))
+                    .foregroundStyle(.white)
+                Spacer()
+                Text(viewModel.isCameraRunning ? "Running" : "Stopped")
+                    .font(.system(size: 12, weight: .bold, design: .rounded))
+                    .foregroundStyle(.white.opacity(0.66))
+            }
+
+            CameraPreviewView(session: viewModel.captureSession)
+                .frame(minHeight: 280, maxHeight: 320)
+                .clipShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 24, style: .continuous)
+                        .stroke(Color.white.opacity(0.10), lineWidth: 1)
+                )
         }
     }
 
@@ -315,6 +401,12 @@ struct ContentView: View {
                     .stroke(color.opacity(0.35), lineWidth: 1)
             )
             .foregroundStyle(.white.opacity(0.92))
+    }
+
+    private func liveTip(_ text: String) -> some View {
+        Text(text)
+            .font(.system(size: 12, weight: .medium, design: .rounded))
+            .foregroundStyle(.white.opacity(0.74))
     }
 }
 

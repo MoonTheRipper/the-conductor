@@ -24,6 +24,7 @@ The current app is a high-value scaffold, not the final audio app yet. It alread
 - loop start and loop close gesture semantics
 - layer balancing for orchestra-style playback
 - UI layout for the performance surface
+- live hand-tracking integration shape through Vision and AVFoundation
 
 ## Current Product Modes
 
@@ -35,13 +36,20 @@ Logic's own internal Library patch browser is not a public automation target, so
 ## Run Locally
 
 ```bash
-swift build --product TheConductorApp
+DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer swift test
+DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer swift build --product TheConductorApp
 swift run TheConductorApp
 ```
 
 If you later install the full Xcode app, you can also open the package directly in Xcode for a richer macOS-app workflow.
 
-The package also includes tests under `Tests/`, but the currently active Command Line Tools toolchain on this machine does not expose the standard Swift test modules. Run them after switching to the full Xcode developer directory.
+If the active developer directory still points to the standalone Command Line Tools, switch it permanently with:
+
+```bash
+sudo xcode-select -s /Applications/Xcode.app/Contents/Developer
+sudo xcodebuild -license accept
+sudo xcodebuild -runFirstLaunch
+```
 
 ## Near-Term Build Order
 

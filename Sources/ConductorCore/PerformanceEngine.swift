@@ -1,0 +1,172 @@
+import Foundation
+import simd
+
+public struct PerformanceEngine: Sendable {
+    public private(set) var harmonyEngine: HarmonyEngine
+    public private(set) var state: PerformanceState
+
+    private var lastLoopToggleTimestamp: TimeInterval = -.infinity
+    private var lastCommitTimestamp: TimeInterval = -.infinity
+    private var lastTransportTimestamp: TimeInterval = -.infinity
+
+    public init(keyCenter: PitchClass = .c) {
+        let harmonyEngine = HarmonyEngine(keyCenter: keyCenter)
+        let (openingChord, chordPlot) = harmonyEngine.chordSelection(for: SIMD2<Double>(0, -1))
+        let (openingInterval, intervalPlot) = harmonyEngine.intervalSelection(for: SIMD2<Double>(0, -1))
+        self.harmonyEngine = harmonyEngine
+        self.state = PerformanceState(
+            currentChord: openingChord,
+            previewChord: openingChord,
+            interval: openingInterval,
+            dynamics: 0.58,
+            isPerforming: false,
+            loopBuffer: LoopBuffer(),
+            layers: Self.defaultLayers,
+            chordPlot: chordPlot,
+            intervalPlot: intervalPlot,
+            activityText: "Standby"
+        )
+    }
+
+    public mutating func setKeyCenter(_ keyCenter: PitchClass) {
+        harmonyEngine = HarmonyEngine(keyCenter: keyCenter)
+        let (chord, chordPlot) = harmonyEngine.chordSelection(for: state.chordPlot.normalized)
+        let (interval, intervalPlot) = harmonyEngine.intervalSelection(for: state.intervalPlot.normalized)
+        state.currentChord = chord
+        state.previewChord = chord
+        state.interval = interval
+        state.chordPlot = chordPlot
+        state.intervalPlot = intervalPlot
+        state.activityText = "Key center set to \(keyCenter.displayName)"
+    }
+
+    public mutating func handle(snapshot: GestureSnapshot) {
+        updatePreviewState(with: snapshot)
+        handleLoopToggle(with: snapshot)
+        handleTransport(with: snapshot)
+        handleCommit(with: snapshot)
+        updateLayers(with: snapshot)
+    }
+
+    private mutating func updatePreviewState(with snapshot: GestureSnapshot) {
+        if let rightHand = snapshot.rightHand {
+            let (previewChord, chordPlot) = harmonyEngine.chordSelection(for: rightHand.position)
+            state.previewChord = previewChord
+            state.chordPlot = chordPlot
+
+            let normalizedHeight = 1.0 - ((rightHand.position.y + 1.0) / 2.0)
+            let gestureEnergy = max(0.0, -rightHand.verticalVelocity) * 0.22
+            state.dynamics = clamped(normalizedHeight + gestureEnergy, lower: 0.12, upper: 1.0)
+        }
+
+        if let leftHand = snapshot.leftHand {
+            let (interval, intervalPlot) = harmonyEngine.intervalSelection(for: leftHand.position)
+            state.interval = interval
+            state.intervalPlot = intervalPlot
+        }
+    }
+
+    private mutating func handleLoopToggle(with snapshot: GestureSnapshot) {
+        guard
+            let leftHand = snapshot.leftHand,
+            let rightHand = snapshot.rightHand,
+            leftHand.pinch > 0.88,
+            rightHand.pinch > 0.88,
+            snapshot.timestamp - lastLoopToggleTimestamp > 0.45
+        else {
+            return
+        }
+
+        if state.loopBuffer.isRecording == false && state.loopBuffer.isPlaying == false {
+            state.loopBuffer = LoopBuffer(
+                phrase: [],
+                isRecording: true,
+                isPlaying: false,
+                startTimestamp: snapshot.timestamp,
+                endTimestamp: nil
+            )
+            state.activityText = "Loop capture started"
+        } else if state.loopBuffer.isRecording {
+            state.loopBuffer.isRecording = false
+            state.loopBuffer.isPlaying = !state.loopBuffer.phrase.isEmpty
+            state.loopBuffer.endTimestamp = snapshot.timestamp
+            state.activityText = state.loopBuffer.phrase.isEmpty
+                ? "Loop closed with no committed chords"
+                : "Loop closed with \(state.loopBuffer.phrase.count) chord events"
+        } else {
+            state.loopBuffer = LoopBuffer()
+            state.activityText = "Loop cleared"
+        }
+
+        lastLoopToggleTimestamp = snapshot.timestamp
+    }
+
+    private mutating func handleTransport(with snapshot: GestureSnapshot) {
+        guard
+            let rightHand = snapshot.rightHand,
+            snapshot.timestamp - lastTransportTimestamp > 0.35
+        else {
+            return
+        }
+
+        if rightHand.openness == .open && rightHand.verticalVelocity < -0.72 {
+            state.isPerforming = true
+            state.activityText = "Ensemble engaged"
+            lastTransportTimestamp = snapshot.timestamp
+            return
+        }
+
+        if rightHand.openness == .closed && rightHand.pinch > 0.55 {
+            state.isPerforming = false
+            state.activityText = "Ensemble muted"
+            lastTransportTimestamp = snapshot.timestamp
+        }
+    }
+
+    private mutating func handleCommit(with snapshot: GestureSnapshot) {
+        guard
+            let rightHand = snapshot.rightHand,
+            rightHand.pinch > 0.82,
+            snapshot.timestamp - lastCommitTimestamp > 0.25
+        else {
+            return
+        }
+
+        state.currentChord = state.previewChord
+        state.isPerforming = true
+
+        if state.loopBuffer.isRecording, state.loopBuffer.phrase.last != state.currentChord {
+            state.loopBuffer.phrase.append(state.currentChord)
+        }
+
+        state.activityText = "Committed \(state.currentChord.symbol) with \(state.interval.spokenName.lowercased()) focus"
+        lastCommitTimestamp = snapshot.timestamp
+    }
+
+    private mutating func updateLayers(with snapshot: GestureSnapshot) {
+        let leftRadius = snapshot.leftHand.map { clamped(simd_length($0.position)) } ?? 0.35
+        let intervalWeight = Double(state.interval.rawValue) / Double(IntervalChoice.thirteenth.rawValue)
+        let stringsMix = clamped(0.45 + state.dynamics * 0.30 - leftRadius * 0.12)
+        let brassMix = clamped(state.dynamics * 0.80 + intervalWeight * 0.18)
+        let woodsMix = clamped(0.25 + (1.0 - leftRadius) * 0.55)
+        let pulseMix = clamped(0.18 + leftRadius * 0.72)
+
+        state.layers = [
+            LayerState(name: "Strings", mix: stringsMix, isEnabled: state.isPerforming),
+            LayerState(name: "Brass", mix: brassMix, isEnabled: state.dynamics > 0.42),
+            LayerState(name: "Woods", mix: woodsMix, isEnabled: state.isPerforming),
+            LayerState(
+                name: "Pulse",
+                mix: pulseMix,
+                isEnabled: state.loopBuffer.isRecording || state.loopBuffer.isPlaying
+            ),
+        ]
+    }
+
+    private static let defaultLayers: [LayerState] = [
+        LayerState(name: "Strings", mix: 0.62, isEnabled: false),
+        LayerState(name: "Brass", mix: 0.35, isEnabled: false),
+        LayerState(name: "Woods", mix: 0.44, isEnabled: false),
+        LayerState(name: "Pulse", mix: 0.20, isEnabled: false),
+    ]
+}

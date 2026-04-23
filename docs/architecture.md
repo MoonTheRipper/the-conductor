@@ -38,9 +38,11 @@ Native macOS presentation shell:
 - standalone instrument catalog discovery for AU, VST/VST3, and library folders
 - standalone Audio Unit host service for direct local playback with per-layer assignment
 - sampler-backed layer hosting for indexed library folders
+- per-layer preset and sample-target selection inside indexed library folders
 - per-layer bus, pan, delay, and reverb routing inside the host graph
 - loop transport and MIDI export controls in the desktop shell
 - searchable catalog UI and indexed library summaries for current sampler-backed hosting
+- live beat-intent diagnostics driven by smoothed hand-tracking confidence
 
 ## Planned Integrations
 

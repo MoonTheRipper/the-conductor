@@ -48,7 +48,8 @@ struct GestureCalibration: Codable, Equatable, Sendable {
             verticalVelocity: clamped(hand.verticalVelocity * velocityScale, lower: -1.5, upper: 1.5),
             horizontalVelocity: clamped(hand.horizontalVelocity * velocityScale, lower: -1.5, upper: 1.5),
             spread: clamped(hand.spread),
-            roll: clamped(hand.roll, lower: -1.0, upper: 1.0)
+            roll: clamped(hand.roll, lower: -1.0, upper: 1.0),
+            downbeatConfidence: clamped(hand.downbeatConfidence)
         )
     }
 

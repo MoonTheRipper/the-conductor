@@ -141,7 +141,7 @@ final class StandaloneAudioHostService: ObservableObject {
                 loadSampleLibrary(
                     layerName: selection.layerName,
                     instrumentID: instrument.id,
-                    instrumentName: instrument.name,
+                    instrumentName: sampleLibraryLoadPlan.displayName,
                     loadPlan: sampleLibraryLoadPlan,
                     outputSettings: selection.outputSettings
                 )

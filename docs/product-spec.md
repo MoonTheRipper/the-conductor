@@ -49,6 +49,7 @@ Loop behavior:
 - discover installed VST/VST3 bundles from standard plugin folders
 - allow user-added library folders for sample sources
 - load playable library folders through a sampler when audio or supported preset assets are present
+- expose per-layer preset or sample-target selection inside each assigned library folder
 - keep the selected target visible in the main control surface
 - label non-hostable targets clearly so discovery and playback status are not conflated
 - expose searchable catalog browsing so large plugin installs stay manageable
@@ -63,9 +64,10 @@ Loop behavior:
 - current chord, interval, loop state, and layer mix visible at a glance
 - layer trims, loop transport, and calibration controls exposed without leaving the main surface
 - standalone routing and effect controls visible without opening a secondary editor
+- live beat-intent diagnostics visible while tuning the camera path
 
-## Next Milestones
+## Post-MVP Directions
 
-1. Improve beat-intent detection from the live camera path.
-2. Add deeper library mapping controls beyond first-pass sampler loading.
-3. Move the standalone host/audio core toward a portable layer for cross-platform builds.
+1. Move the standalone host/audio core toward a portable layer for cross-platform builds.
+2. Add deeper sampler zoning and articulation mapping for large orchestral libraries.
+3. Extend standalone hosting beyond Audio Units into real VST3 instantiation.

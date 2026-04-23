@@ -17,7 +17,7 @@ The current scaffold is intentionally biased toward the product direction we agr
 - Tests for chord mapping, loop capture, and transport muting
 - Product and architecture notes in `docs/`
 
-The current app is a high-value scaffold, not the final audio app yet. It already lets us validate:
+The current app is a working local MVP for the product direction we agreed on. It already lets us validate:
 
 - chord orbit behavior
 - interval orbit behavior
@@ -29,12 +29,14 @@ The current app is a high-value scaffold, not the final audio app yet. It alread
 - real standalone instrument discovery for AU, VST/VST3, and user-added library folders
 - direct standalone Audio Unit playback with one AU assignment per orchestration layer
 - sampler-backed playback for playable library folders assigned per layer
+- per-layer preset or sample-target selection inside each assigned library folder
 - timestamp-accurate loop replay based on captured gesture commits
 - manual orchestration trims on top of the auto-generated layer mix
 - per-layer bus, pan, reverb, and delay routing in standalone mode
 - calibration controls for camera-centered gesture remapping
 - multi-track MIDI export for the captured loop phrase, with tempo, clip name, and repeat controls
 - richer live hand interpretation from spread, roll, and horizontal motion
+- smoothed live downbeat-intent diagnostics for camera-driven transport engagement
 - searchable instrument catalog and indexed library-folder summaries
 
 ## Current Product Modes
@@ -59,7 +61,7 @@ The current standalone catalog implementation exposes:
 - playable library-folder hosting through `AVAudioUnitSampler`
 - panic/all-notes-off control for standalone playback
 - searchable instrument browsing and assign-selected-to-all flow
-- indexed sample/library folder summaries and first-pass playable asset detection
+- indexed sample/library folder summaries and selectable playable targets inside each folder
 - per-layer bus and effect routing for richer standalone mixes
 
 The current loop and control implementation exposes:
@@ -89,8 +91,8 @@ sudo xcodebuild -license accept
 sudo xcodebuild -runFirstLaunch
 ```
 
-## Near-Term Build Order
+## Post-MVP Expansion Ideas
 
-1. Add deeper library mapping controls beyond first-pass sampler loading.
-2. Improve beat-intent detection from the live camera path even further.
-3. Move the audio/plugin core behind a portable C++ layer for cross-platform builds.
+1. Move the audio/plugin core behind a portable C++ layer for cross-platform builds.
+2. Add deeper sampler zoning and articulation mapping beyond preset-or-batch loading.
+3. Extend standalone hosting past Audio Units into real VST3 instantiation.

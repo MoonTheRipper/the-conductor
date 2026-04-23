@@ -137,6 +137,42 @@ struct PerformanceEngineTests {
         #expect(engine.state.loopBuffer.phrase[1].timestamp == 1.35)
     }
 
+    @Test
+    func liveDownbeatConfidenceCanEngageTransport() {
+        var engine = PerformanceEngine(keyCenter: .c)
+
+        let events = engine.handle(snapshot: snapshot(
+            rightVerticalVelocity: -0.34,
+            rightSpread: 0.36,
+            rightDownbeatConfidence: 0.87,
+            timestamp: 0.0
+        ))
+
+        #expect(engine.state.isPerforming)
+        #expect(events.contains {
+            if case .transportChanged(isPerforming: true, _) = $0 { return true }
+            return false
+        })
+    }
+
+    @Test
+    func lowDownbeatConfidenceDoesNotEngageTransport() {
+        var engine = PerformanceEngine(keyCenter: .c)
+
+        let events = engine.handle(snapshot: snapshot(
+            rightVerticalVelocity: -0.12,
+            rightSpread: 0.18,
+            rightDownbeatConfidence: 0.18,
+            timestamp: 0.0
+        ))
+
+        #expect(engine.state.isPerforming == false)
+        #expect(events.contains {
+            if case .transportChanged = $0 { return true }
+            return false
+        } == false)
+    }
+
     private func snapshot(
         leftPosition: SIMD2<Double> = SIMD2<Double>(-0.35, 0.2),
         rightPosition: SIMD2<Double> = SIMD2<Double>(0.1, -0.7),
@@ -144,12 +180,16 @@ struct PerformanceEngineTests {
         rightPinch: Double = 0.18,
         leftOpenness: HandOpenness = .relaxed,
         rightOpenness: HandOpenness = .open,
+        leftVerticalVelocity: Double = 0,
+        rightVerticalVelocity: Double = -0.2,
         leftHorizontalVelocity: Double = 0,
         rightHorizontalVelocity: Double = 0,
         leftSpread: Double = 0.45,
         rightSpread: Double = 0.45,
         leftRoll: Double = 0,
         rightRoll: Double = 0,
+        leftDownbeatConfidence: Double = 0,
+        rightDownbeatConfidence: Double = 0,
         timestamp: TimeInterval
     ) -> GestureSnapshot {
         GestureSnapshot(
@@ -157,19 +197,21 @@ struct PerformanceEngineTests {
                 position: leftPosition,
                 pinch: leftPinch,
                 openness: leftOpenness,
-                verticalVelocity: 0,
+                verticalVelocity: leftVerticalVelocity,
                 horizontalVelocity: leftHorizontalVelocity,
                 spread: leftSpread,
-                roll: leftRoll
+                roll: leftRoll,
+                downbeatConfidence: leftDownbeatConfidence
             ),
             rightHand: HandState(
                 position: rightPosition,
                 pinch: rightPinch,
                 openness: rightOpenness,
-                verticalVelocity: -0.2,
+                verticalVelocity: rightVerticalVelocity,
                 horizontalVelocity: rightHorizontalVelocity,
                 spread: rightSpread,
-                roll: rightRoll
+                roll: rightRoll,
+                downbeatConfidence: rightDownbeatConfidence
             ),
             timestamp: timestamp
         )

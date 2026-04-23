@@ -86,7 +86,13 @@ final class SessionViewModel: ObservableObject {
     @Published private(set) var layerMixMultipliers: [String: Double]
     @Published private(set) var layerManualEnabled: [String: Bool]
     @Published private(set) var layerAssignedInstrumentIDs: [String: String]
+    @Published private(set) var layerLibraryTargetIDs: [String: String]
     @Published private(set) var layerOutputSettings: [String: LayerOutputSettings]
+    @Published private(set) var liveBeatConfidence = 0.0
+    @Published private(set) var liveRightHandVelocity = 0.0
+    @Published private(set) var liveRightHandPinch = 0.0
+    @Published private(set) var liveRightHandSpread = 0.0
+    @Published private(set) var liveGestureIntentText = "Awaiting gesture input"
 
     private var engine: PerformanceEngine
     private var frameClock: TimeInterval = 0
@@ -105,6 +111,7 @@ final class SessionViewModel: ObservableObject {
     private static let layerMixDefaultsKey = "TheConductor.layerMixMultipliers"
     private static let layerEnabledDefaultsKey = "TheConductor.layerManualEnabled"
     private static let layerAssignmentsDefaultsKey = "TheConductor.layerAssignedInstrumentIDs"
+    private static let layerLibraryTargetsDefaultsKey = "TheConductor.layerLibraryTargetIDs"
     private static let layerOutputSettingsDefaultsKey = "TheConductor.layerOutputSettings"
     private static let exportOptionsDefaultsKey = "TheConductor.exportOptions"
 
@@ -120,6 +127,7 @@ final class SessionViewModel: ObservableObject {
         self.layerMixMultipliers = Self.loadLayerMixMultipliers()
         self.layerManualEnabled = Self.loadLayerManualEnabled()
         self.layerAssignedInstrumentIDs = Self.loadLayerAssignments()
+        self.layerLibraryTargetIDs = Self.loadLayerLibraryTargets()
         self.layerOutputSettings = Self.loadLayerOutputSettings()
         bindLiveTracking()
         bindMIDIBridge()
@@ -279,6 +287,7 @@ final class SessionViewModel: ObservableObject {
             set: { newValue in
                 self.layerAssignedInstrumentIDs[layerName] = newValue
                 self.persistLayerAssignments()
+                self.normalizeLayerLibraryTargets()
                 self.configureStandaloneSelection()
             }
         )
@@ -313,6 +322,17 @@ final class SessionViewModel: ObservableObject {
         )
     }
 
+    func layerLibraryTargetBinding(for layerName: String) -> Binding<String> {
+        Binding(
+            get: { self.layerLibraryTargetIDs[layerName] ?? "" },
+            set: { newValue in
+                self.layerLibraryTargetIDs[layerName] = newValue
+                self.persistLayerLibraryTargets()
+                self.configureStandaloneSelection()
+            }
+        )
+    }
+
     func instrumentOptions(including instrumentID: String? = nil) -> [InstrumentDescriptor] {
         var instruments = filteredInstruments
         if let instrumentID,
@@ -330,6 +350,19 @@ final class SessionViewModel: ObservableObject {
     func currentLayerInstrument(for layerName: String) -> InstrumentDescriptor? {
         let instrumentID = layerAssignedInstrumentIDs[layerName] ?? ""
         return availableInstruments.first(where: { $0.id == instrumentID })
+    }
+
+    func layerLibraryTargetOptions(for layerName: String) -> [SampleLibraryPlayableTarget] {
+        guard let instrument = currentLayerInstrument(for: layerName), instrument.format == .sampleLibrary else {
+            return []
+        }
+        return standaloneCatalogService.sampleLibraryPlayableTargets(for: instrument.id)
+    }
+
+    func selectedLayerLibraryTarget(for layerName: String) -> SampleLibraryPlayableTarget? {
+        let targetOptions = layerLibraryTargetOptions(for: layerName)
+        let selectedTargetID = layerLibraryTargetIDs[layerName] ?? ""
+        return targetOptions.first(where: { $0.id == selectedTargetID }) ?? targetOptions.first
     }
 
     func layerAssignmentSummary(for layerName: String) -> String {
@@ -355,6 +388,10 @@ final class SessionViewModel: ObservableObject {
 
     func layerOutputSummary(for layerName: String) -> String {
         (layerOutputSettings[layerName] ?? LayerOutputSettings.default(for: layerName)).summaryText
+    }
+
+    func layerLibraryTargetSummary(for layerName: String) -> String? {
+        selectedLayerLibraryTarget(for: layerName)?.detailText
     }
 
     func startLiveTracking() {
@@ -423,6 +460,7 @@ final class SessionViewModel: ObservableObject {
             layerAssignedInstrumentIDs[layerName] = selectedInstrumentID
         }
         persistLayerAssignments()
+        normalizeLayerLibraryTargets()
         configureStandaloneSelection()
     }
 
@@ -430,7 +468,11 @@ final class SessionViewModel: ObservableObject {
         layerAssignedInstrumentIDs = Dictionary(
             uniqueKeysWithValues: PerformanceLayerPlanner.layerNames.map { ($0, "") }
         )
+        layerLibraryTargetIDs = Dictionary(
+            uniqueKeysWithValues: PerformanceLayerPlanner.layerNames.map { ($0, "") }
+        )
         persistLayerAssignments()
+        persistLayerLibraryTargets()
         configureStandaloneSelection()
     }
 
@@ -571,6 +613,7 @@ final class SessionViewModel: ObservableObject {
                     self.selectedInstrumentID = instruments.first?.id ?? ""
                 }
                 self.normalizeLayerAssignments()
+                self.normalizeLayerLibraryTargets()
                 self.configureStandaloneSelection()
             }
             .store(in: &cancellables)
@@ -691,7 +734,12 @@ final class SessionViewModel: ObservableObject {
                 verticalVelocity: debugState.leftVerticalVelocity,
                 horizontalVelocity: 0,
                 spread: simulatedSpread(for: debugState.leftOpenness, pinch: debugState.leftPinch),
-                roll: debugState.leftPosition.x * 0.4
+                roll: debugState.leftPosition.x * 0.4,
+                downbeatConfidence: simulatedDownbeatConfidence(
+                    openness: debugState.leftOpenness,
+                    verticalVelocity: debugState.leftVerticalVelocity,
+                    spread: simulatedSpread(for: debugState.leftOpenness, pinch: debugState.leftPinch)
+                )
             ),
             rightHand: HandState(
                 position: debugState.rightPosition,
@@ -700,7 +748,12 @@ final class SessionViewModel: ObservableObject {
                 verticalVelocity: debugState.rightVerticalVelocity,
                 horizontalVelocity: 0,
                 spread: simulatedSpread(for: debugState.rightOpenness, pinch: debugState.rightPinch),
-                roll: debugState.rightPosition.x * 0.4
+                roll: debugState.rightPosition.x * 0.4,
+                downbeatConfidence: simulatedDownbeatConfidence(
+                    openness: debugState.rightOpenness,
+                    verticalVelocity: debugState.rightVerticalVelocity,
+                    spread: simulatedSpread(for: debugState.rightOpenness, pinch: debugState.rightPinch)
+                )
             ),
             timestamp: frameClock
         )
@@ -710,6 +763,7 @@ final class SessionViewModel: ObservableObject {
 
     private func apply(snapshot: GestureSnapshot) {
         let calibratedSnapshot = calibration.apply(to: snapshot)
+        updateLiveDiagnostics(from: calibratedSnapshot)
         let events = engine.handle(snapshot: calibratedSnapshot)
         performanceState = engine.state
         updateLoopTransportStatus()
@@ -855,10 +909,13 @@ final class SessionViewModel: ObservableObject {
             }
             persistLayerAssignments()
         }
+        normalizeLayerLibraryTargets()
         configureStandaloneSelection()
     }
 
     private func configureStandaloneSelection() {
+        normalizeLayerLibraryTargets()
+
         let selections = PerformanceLayerPlanner.layerNames.map { layerName in
             let instrumentID = layerAssignedInstrumentIDs[layerName] ?? ""
             let instrument = availableInstruments.first(where: { $0.id == instrumentID })
@@ -866,7 +923,10 @@ final class SessionViewModel: ObservableObject {
                 standaloneCatalogService.audioUnitDescription(for: $0.id)
             }
             let sampleLibraryLoadPlan = instrument.flatMap {
-                standaloneCatalogService.sampleLibraryLoadPlan(for: $0.id)
+                standaloneCatalogService.sampleLibraryLoadPlan(
+                    for: $0.id,
+                    selectedTargetID: layerLibraryTargetIDs[layerName]
+                )
             }
             let supportSummary = instrumentID.isEmpty
                 ? "No standalone target assigned"
@@ -940,6 +1000,10 @@ final class SessionViewModel: ObservableObject {
         UserDefaults.standard.set(layerAssignedInstrumentIDs, forKey: Self.layerAssignmentsDefaultsKey)
     }
 
+    private func persistLayerLibraryTargets() {
+        UserDefaults.standard.set(layerLibraryTargetIDs, forKey: Self.layerLibraryTargetsDefaultsKey)
+    }
+
     private func persistLayerOutputSettings() {
         guard let data = try? JSONEncoder().encode(layerOutputSettings) else { return }
         UserDefaults.standard.set(data, forKey: Self.layerOutputSettingsDefaultsKey)
@@ -975,6 +1039,15 @@ final class SessionViewModel: ObservableObject {
             uniqueKeysWithValues: PerformanceLayerPlanner.layerNames.map { ($0, "") }
         )
         let stored = UserDefaults.standard.dictionary(forKey: layerAssignmentsDefaultsKey) as? [String: String] ?? [:]
+        merged.merge(stored) { _, stored in stored }
+        return merged
+    }
+
+    private static func loadLayerLibraryTargets() -> [String: String] {
+        var merged = Dictionary(
+            uniqueKeysWithValues: PerformanceLayerPlanner.layerNames.map { ($0, "") }
+        )
+        let stored = UserDefaults.standard.dictionary(forKey: layerLibraryTargetsDefaultsKey) as? [String: String] ?? [:]
         merged.merge(stored) { _, stored in stored }
         return merged
     }
@@ -1016,6 +1089,23 @@ final class SessionViewModel: ObservableObject {
         persistLayerAssignments()
     }
 
+    private func normalizeLayerLibraryTargets() {
+        for layerName in PerformanceLayerPlanner.layerNames {
+            guard let instrument = currentLayerInstrument(for: layerName), instrument.format == .sampleLibrary else {
+                layerLibraryTargetIDs[layerName] = ""
+                continue
+            }
+
+            let targetOptions = standaloneCatalogService.sampleLibraryPlayableTargets(for: instrument.id)
+            let selectedTargetID = layerLibraryTargetIDs[layerName] ?? ""
+            if targetOptions.contains(where: { $0.id == selectedTargetID }) == false {
+                layerLibraryTargetIDs[layerName] = targetOptions.first?.id ?? ""
+            }
+        }
+
+        persistLayerLibraryTargets()
+    }
+
     private static var defaultLayerMixMultipliers: [String: Double] {
         Dictionary(uniqueKeysWithValues: PerformanceLayerPlanner.layerChannels.map { ($0.name, 1.0) })
     }
@@ -1041,5 +1131,49 @@ final class SessionViewModel: ObservableObject {
             base = 0.82
         }
         return min(max(base - (pinch * 0.18), 0.0), 1.0)
+    }
+
+    private func simulatedDownbeatConfidence(
+        openness: HandOpenness,
+        verticalVelocity: Double,
+        spread: Double
+    ) -> Double {
+        let opennessLift: Double
+        switch openness {
+        case .open:
+            opennessLift = 0.14
+        case .relaxed:
+            opennessLift = 0.06
+        case .closed:
+            opennessLift = 0.0
+        }
+
+        return min(max((max(0.0, -verticalVelocity) * 0.58) + (spread * 0.18) + opennessLift, 0.0), 1.0)
+    }
+
+    private func updateLiveDiagnostics(from snapshot: GestureSnapshot) {
+        guard let rightHand = snapshot.rightHand else {
+            liveBeatConfidence = 0
+            liveRightHandVelocity = 0
+            liveRightHandPinch = 0
+            liveRightHandSpread = 0
+            liveGestureIntentText = "No right hand detected"
+            return
+        }
+
+        liveBeatConfidence = rightHand.downbeatConfidence
+        liveRightHandVelocity = rightHand.verticalVelocity
+        liveRightHandPinch = rightHand.pinch
+        liveRightHandSpread = rightHand.spread
+
+        if (snapshot.leftHand?.pinch ?? 0) > 0.88 && rightHand.pinch > 0.88 {
+            liveGestureIntentText = "Loop toggle armed"
+        } else if rightHand.downbeatConfidence > 0.76 && rightHand.openness == .open {
+            liveGestureIntentText = "Downbeat intent ready"
+        } else if rightHand.pinch > 0.82 {
+            liveGestureIntentText = "Commit gesture armed"
+        } else {
+            liveGestureIntentText = "Tracking harmonic preview"
+        }
     }
 }

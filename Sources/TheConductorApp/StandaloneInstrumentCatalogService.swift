@@ -44,7 +44,44 @@ struct LibraryFolderDescriptor: Identifiable, Equatable {
 }
 
 struct SampleLibraryLoadPlan {
+    let libraryDisplayName: String
+    let target: SampleLibraryPlayableTarget
+
+    var isPlayableNow: Bool {
+        target.isPlayableNow
+    }
+
+    var displayName: String {
+        "\(libraryDisplayName) · \(target.displayName)"
+    }
+
+    var targetDisplayName: String {
+        target.displayName
+    }
+
+    var presetURL: URL? {
+        target.presetURL
+    }
+
+    var audioFileURLs: [URL] {
+        target.audioFileURLs
+    }
+
+    var hostSummaryText: String {
+        target.hostSummaryText
+    }
+}
+
+struct SampleLibraryPlayableTarget: Identifiable, Equatable {
+    enum Kind: String {
+        case preset
+        case audioBatch
+    }
+
+    let id: String
+    let kind: Kind
     let displayName: String
+    let detailText: String
     let presetURL: URL?
     let audioFileURLs: [URL]
 
@@ -53,15 +90,17 @@ struct SampleLibraryLoadPlan {
     }
 
     var hostSummaryText: String {
-        if let presetURL {
-            return "Sampler preset: \(presetURL.lastPathComponent)"
+        switch kind {
+        case .preset:
+            return presetURL.map { "Sampler preset: \($0.lastPathComponent)" } ?? detailText
+        case .audioBatch:
+            if let firstAudio = audioFileURLs.first {
+                return audioFileURLs.count == 1
+                    ? "Single audio sample: \(firstAudio.lastPathComponent)"
+                    : "\(audioFileURLs.count) audio samples starting with \(firstAudio.lastPathComponent)"
+            }
+            return detailText
         }
-        if let firstAudio = audioFileURLs.first {
-            return audioFileURLs.count == 1
-                ? "Single audio sample: \(firstAudio.lastPathComponent)"
-                : "\(audioFileURLs.count) audio samples starting with \(firstAudio.lastPathComponent)"
-        }
-        return "No playable sample assets found"
     }
 }
 
@@ -83,6 +122,7 @@ final class StandaloneInstrumentCatalogService: ObservableObject {
     private let indexedOnlyExtensions: Set<String> = [
         "nki", "nkm", "sfz",
     ]
+    private var playableTargetsByLibraryPath: [String: [SampleLibraryPlayableTarget]] = [:]
 
     init() {
         loadLibraryFolders()
@@ -90,6 +130,7 @@ final class StandaloneInstrumentCatalogService: ObservableObject {
     }
 
     func refresh() {
+        playableTargetsByLibraryPath = [:]
         let audioUnits = discoverAudioUnits()
         let vsts = discoverFilesystemPlugins(format: .vst3, directories: vst3Directories, suffix: "vst3")
         let legacyVSTs = discoverFilesystemPlugins(format: .vst3, directories: vstDirectories, suffix: "vst")
@@ -137,8 +178,9 @@ final class StandaloneInstrumentCatalogService: ObservableObject {
             return "Discovered, but VST hosting is not implemented yet"
         case .sampleLibrary:
             if let folder = libraryFolders.first(where: { "library-\($0.path)" == instrumentID }) {
+                let targetCount = sampleLibraryPlayableTargets(for: instrumentID).count
                 return folder.isPlayableNow
-                    ? "\(folder.summaryText) · playable now through sampler hosting"
+                    ? "\(folder.summaryText) · \(targetCount) playable target\(targetCount == 1 ? "" : "s")"
                     : "\(folder.summaryText) · indexed for future sample hosting"
             }
             return "Indexed for future sample hosting, but not directly playable yet"
@@ -168,16 +210,55 @@ final class StandaloneInstrumentCatalogService: ObservableObject {
         }
     }
 
-    func sampleLibraryLoadPlan(for instrumentID: String, maxAudioFiles: Int = 12) -> SampleLibraryLoadPlan? {
+    func sampleLibraryLoadPlan(for instrumentID: String, maxAudioFiles: Int = 24) -> SampleLibraryLoadPlan? {
+        sampleLibraryLoadPlan(for: instrumentID, selectedTargetID: nil, maxAudioFiles: maxAudioFiles)
+    }
+
+    func sampleLibraryPlayableTargets(
+        for instrumentID: String,
+        maxAudioFilesPerTarget: Int = 24
+    ) -> [SampleLibraryPlayableTarget] {
+        guard let folder = libraryFolders.first(where: { "library-\($0.path)" == instrumentID }) else {
+            return []
+        }
+
+        if let cached = playableTargetsByLibraryPath[folder.path] {
+            return cached
+        }
+
+        let targets = buildPlayableTargets(at: folder.path, maxAudioFilesPerTarget: maxAudioFilesPerTarget)
+        playableTargetsByLibraryPath[folder.path] = targets
+        return targets
+    }
+
+    func sampleLibraryLoadPlan(
+        for instrumentID: String,
+        selectedTargetID: String?,
+        maxAudioFiles: Int = 24
+    ) -> SampleLibraryLoadPlan? {
         guard let folder = libraryFolders.first(where: { "library-\($0.path)" == instrumentID }) else {
             return nil
         }
 
-        let assets = collectLibraryAssets(at: folder.path, maxAudioFiles: maxAudioFiles)
+        let playableTargets = sampleLibraryPlayableTargets(
+            for: instrumentID,
+            maxAudioFilesPerTarget: maxAudioFiles
+        )
+        guard playableTargets.isEmpty == false else {
+            return nil
+        }
+
+        let selectedTarget = selectedTargetID.flatMap { targetID in
+            playableTargets.first(where: { $0.id == targetID })
+        } ?? playableTargets.first
+
+        guard let selectedTarget else {
+            return nil
+        }
+
         return SampleLibraryLoadPlan(
-            displayName: folder.displayName,
-            presetURL: assets.playablePresetURLs.first,
-            audioFileURLs: Array(assets.audioSampleURLs.prefix(maxAudioFiles))
+            libraryDisplayName: folder.displayName,
+            target: selectedTarget
         )
     }
 
@@ -327,6 +408,66 @@ final class StandaloneInstrumentCatalogService: ObservableObject {
         )
     }
 
+    private func buildPlayableTargets(
+        at path: String,
+        maxAudioFilesPerTarget: Int
+    ) -> [SampleLibraryPlayableTarget] {
+        let rootURL = URL(fileURLWithPath: path)
+        let assets = collectLibraryAssets(at: path, maxAudioFiles: 0)
+
+        let presetTargets = assets.playablePresetURLs.map { presetURL in
+            SampleLibraryPlayableTarget(
+                id: "preset::\(presetURL.path)",
+                kind: .preset,
+                displayName: presetURL.deletingPathExtension().lastPathComponent,
+                detailText: "Preset · \(relativePath(for: presetURL, inside: rootURL))",
+                presetURL: presetURL,
+                audioFileURLs: []
+            )
+        }
+
+        let groupedAudioFiles = Dictionary(grouping: assets.audioSampleURLs) { fileURL in
+            fileURL.deletingLastPathComponent().path
+        }
+
+        let audioTargets = groupedAudioFiles
+            .map { directoryPath, fileURLs -> SampleLibraryPlayableTarget in
+                let directoryURL = URL(fileURLWithPath: directoryPath)
+                let sortedFiles = fileURLs.sorted {
+                    $0.lastPathComponent.localizedCaseInsensitiveCompare($1.lastPathComponent) == .orderedAscending
+                }
+                let clippedFiles = Array(sortedFiles.prefix(maxAudioFilesPerTarget))
+                let relativeDirectory = relativeDirectoryName(for: directoryURL, inside: rootURL)
+                let displayName: String
+                let detailText: String
+
+                if sortedFiles.count == 1, let fileURL = sortedFiles.first {
+                    displayName = fileURL.deletingPathExtension().lastPathComponent
+                    detailText = "Sample · \(relativePath(for: fileURL, inside: rootURL))"
+                } else {
+                    displayName = relativeDirectory
+                    let clipSuffix = clippedFiles.count < sortedFiles.count
+                        ? " · loading first \(clippedFiles.count)"
+                        : ""
+                    detailText = "\(sortedFiles.count) samples · \(relativeDirectory)\(clipSuffix)"
+                }
+
+                return SampleLibraryPlayableTarget(
+                    id: "audio::\(directoryPath)",
+                    kind: .audioBatch,
+                    displayName: displayName,
+                    detailText: detailText,
+                    presetURL: nil,
+                    audioFileURLs: clippedFiles
+                )
+            }
+            .sorted { lhs, rhs in
+                lhs.displayName.localizedCaseInsensitiveCompare(rhs.displayName) == .orderedAscending
+            }
+
+        return presetTargets + audioTargets
+    }
+
     private func collectLibraryAssets(at path: String, maxAudioFiles: Int) -> (
         audioSampleURLs: [URL],
         playablePresetURLs: [URL],
@@ -371,5 +512,21 @@ final class StandaloneInstrumentCatalogService: ObservableObject {
             playablePresetCount,
             indexedOnlyCount
         )
+    }
+
+    private func relativePath(for url: URL, inside rootURL: URL) -> String {
+        let rootPath = rootURL.path.hasSuffix("/") ? rootURL.path : rootURL.path + "/"
+        if url.path.hasPrefix(rootPath) {
+            return String(url.path.dropFirst(rootPath.count))
+        }
+        return url.lastPathComponent
+    }
+
+    private func relativeDirectoryName(for directoryURL: URL, inside rootURL: URL) -> String {
+        if directoryURL.path == rootURL.path {
+            return "\(rootURL.lastPathComponent) Samples"
+        }
+        let relativePath = relativePath(for: directoryURL, inside: rootURL)
+        return relativePath.isEmpty ? "\(rootURL.lastPathComponent) Samples" : relativePath
     }
 }

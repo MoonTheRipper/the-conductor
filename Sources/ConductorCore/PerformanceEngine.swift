@@ -122,21 +122,14 @@ public struct PerformanceEngine: Sendable {
             return []
         }
 
-        if rightHand.openness == .open && rightHand.verticalVelocity < -0.72 {
+        let velocityDrivenDownbeat = (-rightHand.verticalVelocity * 0.72) + (rightHand.spread * 0.18)
+        let gestureDownbeatStrength = max(rightHand.downbeatConfidence, velocityDrivenDownbeat)
+        if rightHand.openness == .open && gestureDownbeatStrength > 0.76 {
             let wasPerforming = state.isPerforming
             state.isPerforming = true
-            state.activityText = "Ensemble engaged"
-            lastTransportTimestamp = snapshot.timestamp
-            return wasPerforming ? [] : [
-                .transportChanged(isPerforming: true, timestamp: snapshot.timestamp),
-            ]
-        }
-
-        let gestureDownbeatStrength = (-rightHand.verticalVelocity * 0.78) + (rightHand.spread * 0.22)
-        if rightHand.openness == .open && gestureDownbeatStrength > 0.92 {
-            let wasPerforming = state.isPerforming
-            state.isPerforming = true
-            state.activityText = "Ensemble engaged"
+            state.activityText = rightHand.downbeatConfidence > velocityDrivenDownbeat
+                ? "Ensemble engaged from live downbeat intent"
+                : "Ensemble engaged"
             lastTransportTimestamp = snapshot.timestamp
             return wasPerforming ? [] : [
                 .transportChanged(isPerforming: true, timestamp: snapshot.timestamp),

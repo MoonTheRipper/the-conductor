@@ -421,6 +421,17 @@ struct ContentView: View {
                 actionButton("Stop Camera", color: .red, action: viewModel.stopLiveTracking)
             }
 
+            HStack(spacing: 10) {
+                liveMetricCard(title: "Beat", value: "\(Int(viewModel.liveBeatConfidence * 100))%")
+                liveMetricCard(title: "Velocity", value: String(format: "%.2f", viewModel.liveRightHandVelocity))
+                liveMetricCard(title: "Pinch", value: "\(Int(viewModel.liveRightHandPinch * 100))%")
+                liveMetricCard(title: "Spread", value: "\(Int(viewModel.liveRightHandSpread * 100))%")
+            }
+
+            Text(viewModel.liveGestureIntentText)
+                .font(.system(size: 12, weight: .bold, design: .rounded))
+                .foregroundStyle(.cyan.opacity(0.9))
+
             Text("Live mode feeds Vision hand-pose observations into the same harmonic engine used by the simulator. Keep the simulator for deterministic tuning and use the camera path to validate real gestures.")
                 .font(.system(size: 12, weight: .medium, design: .rounded))
                 .foregroundStyle(.white.opacity(0.64))
@@ -724,6 +735,22 @@ struct ContentView: View {
             }
             .pickerStyle(.menu)
 
+            let libraryTargets = viewModel.layerLibraryTargetOptions(for: layerName)
+            if libraryTargets.isEmpty == false {
+                Picker("\(layerName) Library Voice", selection: viewModel.layerLibraryTargetBinding(for: layerName)) {
+                    ForEach(libraryTargets) { target in
+                        Text(target.displayName).tag(target.id)
+                    }
+                }
+                .pickerStyle(.menu)
+
+                if let targetSummary = viewModel.layerLibraryTargetSummary(for: layerName) {
+                    Text(targetSummary)
+                        .font(.system(size: 11, weight: .medium, design: .rounded))
+                        .foregroundStyle(.cyan.opacity(0.82))
+                }
+            }
+
             if let topology = viewModel.loadedLayerTopologyText(for: layerName) {
                 Text(topology)
                     .font(.system(size: 11, weight: .medium, design: .rounded))
@@ -758,6 +785,23 @@ struct ContentView: View {
                     .stroke(color.opacity(0.35), lineWidth: 1)
             )
             .foregroundStyle(.white.opacity(0.92))
+    }
+
+    private func liveMetricCard(title: String, value: String) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text(title.uppercased())
+                .font(.system(size: 10, weight: .bold, design: .rounded))
+                .foregroundStyle(.white.opacity(0.48))
+            Text(value)
+                .font(.system(size: 15, weight: .heavy, design: .rounded))
+                .foregroundStyle(.white)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(10)
+        .background(
+            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                .fill(Color.white.opacity(0.06))
+        )
     }
 
     private func liveTip(_ text: String) -> some View {

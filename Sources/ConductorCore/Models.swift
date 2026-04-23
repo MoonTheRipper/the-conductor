@@ -147,6 +147,7 @@ public struct HandState: Equatable, Sendable {
     public var horizontalVelocity: Double
     public var spread: Double
     public var roll: Double
+    public var downbeatConfidence: Double
 
     public init(
         position: SIMD2<Double>,
@@ -155,7 +156,8 @@ public struct HandState: Equatable, Sendable {
         verticalVelocity: Double,
         horizontalVelocity: Double = 0,
         spread: Double = 0.5,
-        roll: Double = 0
+        roll: Double = 0,
+        downbeatConfidence: Double = 0
     ) {
         self.position = position
         self.pinch = pinch
@@ -164,6 +166,7 @@ public struct HandState: Equatable, Sendable {
         self.horizontalVelocity = horizontalVelocity
         self.spread = spread
         self.roll = roll
+        self.downbeatConfidence = downbeatConfidence
     }
 }
 

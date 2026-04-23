@@ -180,6 +180,8 @@ final class HandPoseProcessor {
     private var lastMappedXByHand: [HandKey: Double] = [:]
     private var lastMappedYByHand: [HandKey: Double] = [:]
     private var lastTimestampByHand: [HandKey: TimeInterval] = [:]
+    private var lastVerticalVelocityByHand: [HandKey: Double] = [:]
+    private var smoothedDownbeatConfidenceByHand: [HandKey: Double] = [:]
     private var lastProcessedTime: TimeInterval = 0
 
     func process(sampleBuffer: CMSampleBuffer) -> GestureSnapshot? {
@@ -276,19 +278,48 @@ final class HandPoseProcessor {
         let spread = clampValue(simd_distance(indexTip, littleTip) / 0.42)
         let rollRadians = atan2(littleMCP.y - indexMCP.y, littleMCP.x - indexMCP.x)
         let roll = clampValue(rollRadians / (.pi / 2), lower: -1.0, upper: 1.0)
+        let clampedVerticalVelocity = clampValue(verticalVelocity, lower: -1.4, upper: 1.4)
+        let clampedHorizontalVelocity = clampValue(horizontalVelocity, lower: -1.4, upper: 1.4)
+        let previousVerticalVelocity = lastVerticalVelocityByHand[handKey] ?? clampedVerticalVelocity
+        let velocityDelta = (clampedVerticalVelocity - previousVerticalVelocity) / deltaTime
+        let downwardVelocity = max(0.0, -clampedVerticalVelocity)
+        let downwardAcceleration = max(0.0, -velocityDelta)
+        let reboundBonus = max(0.0, previousVerticalVelocity) * 0.16
+        let opennessLift: Double
+        switch openness {
+        case .open:
+            opennessLift = 0.14
+        case .relaxed:
+            opennessLift = 0.06
+        case .closed:
+            opennessLift = 0.0
+        }
+
+        let rawDownbeatConfidence = clampValue(
+            downwardVelocity * 0.46 +
+                downwardAcceleration * 0.10 +
+                spread * 0.14 +
+                reboundBonus +
+                opennessLift
+        )
+        let previousConfidence = smoothedDownbeatConfidenceByHand[handKey] ?? rawDownbeatConfidence
+        let downbeatConfidence = clampValue((previousConfidence * 0.38) + (rawDownbeatConfidence * 0.62))
 
         lastMappedXByHand[handKey] = mappedPosition.x
         lastMappedYByHand[handKey] = mappedPosition.y
         lastTimestampByHand[handKey] = timestamp
+        lastVerticalVelocityByHand[handKey] = clampedVerticalVelocity
+        smoothedDownbeatConfidenceByHand[handKey] = downbeatConfidence
 
         return HandState(
             position: mappedPosition,
             pinch: pinch,
             openness: openness,
-            verticalVelocity: clampValue(verticalVelocity, lower: -1.4, upper: 1.4),
-            horizontalVelocity: clampValue(horizontalVelocity, lower: -1.4, upper: 1.4),
+            verticalVelocity: clampedVerticalVelocity,
+            horizontalVelocity: clampedHorizontalVelocity,
             spread: spread,
-            roll: roll
+            roll: roll,
+            downbeatConfidence: downbeatConfidence
         )
     }
 

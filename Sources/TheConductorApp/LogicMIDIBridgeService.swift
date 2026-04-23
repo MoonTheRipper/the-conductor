@@ -21,13 +21,6 @@ final class LogicMIDIBridgeService: ObservableObject {
 
     let virtualSourceName = "The Conductor"
 
-    private let layerChannels: [(name: String, channel: UInt8)] = [
-        ("Strings", 0),
-        ("Brass", 1),
-        ("Woods", 2),
-        ("Pulse", 3),
-    ]
-
     private var client = MIDIClientRef()
     private var outputPort = MIDIPortRef()
     private var virtualSource = MIDIEndpointRef()
@@ -52,7 +45,7 @@ final class LogicMIDIBridgeService: ObservableObject {
     }
 
     var channelMapDescription: [String] {
-        layerChannels.map { "\($0.name) -> MIDI ch \($0.channel + 1)" }
+        PerformanceLayerPlanner.channelMapDescription
     }
 
     func refreshDestinations() {
@@ -114,7 +107,7 @@ final class LogicMIDIBridgeService: ObservableObject {
             return
         }
 
-        let payloads = buildLayerPayloads(
+        let payloads = PerformanceLayerPlanner.payloads(
             chord: chord,
             interval: interval,
             dynamics: dynamics,
@@ -176,7 +169,7 @@ final class LogicMIDIBridgeService: ObservableObject {
     }
 
     private func emitAllNotesOff() {
-        for layer in layerChannels {
+        for layer in PerformanceLayerPlanner.layerChannels {
             dispatch(bytes: [UInt8(0xB0 | layer.channel), 123, 0])
             dispatch(bytes: [UInt8(0xB0 | layer.channel), 120, 0])
         }
@@ -217,116 +210,6 @@ final class LogicMIDIBridgeService: ObservableObject {
             perform(packetList)
         }
     }
-
-    private func buildLayerPayloads(
-        chord: ChordSelection,
-        interval: IntervalChoice,
-        dynamics: Double,
-        layers: [LayerState]
-    ) -> [MIDILayerPayload] {
-        layerChannels.compactMap { mapping in
-            guard let layer = layers.first(where: { $0.name == mapping.name }) else {
-                return nil
-            }
-            guard layer.isEnabled, layer.mix > 0.12 else {
-                return nil
-            }
-
-            let notes = voicing(
-                for: mapping.name,
-                chord: chord,
-                interval: interval,
-                dynamics: dynamics
-            )
-
-            guard notes.isEmpty == false else { return nil }
-
-            let velocity = UInt8(
-                max(24, min(124, Int(34 + (dynamics * 48) + (layer.mix * 36))))
-            )
-
-            return MIDILayerPayload(channel: mapping.channel, notes: notes, velocity: velocity)
-        }
-    }
-
-    private func voicing(
-        for layerName: String,
-        chord: ChordSelection,
-        interval: IntervalChoice,
-        dynamics: Double
-    ) -> [UInt8] {
-        let root = 48 + chord.root.rawValue
-        let tones = chordToneOffsets(for: chord.quality)
-        let third = tones[safe: 1] ?? 4
-        let fifth = tones[safe: 2] ?? 7
-        let seventh = tones[safe: 3] ?? 10
-        let top = interval.rawValue
-
-        let candidateNotes: [Int]
-        switch layerName {
-        case "Strings":
-            candidateNotes = [
-                root + 12,
-                root + 12 + third,
-                root + 12 + fifth,
-                root + 12 + top,
-                dynamics > 0.72 ? root + 24 : nil,
-            ].compactMap { $0 }
-        case "Brass":
-            candidateNotes = [
-                root,
-                root + third,
-                root + fifth,
-                root + seventh,
-            ]
-        case "Woods":
-            candidateNotes = [
-                root + 24,
-                root + 24 + third,
-                root + 24 + top,
-            ]
-        case "Pulse":
-            candidateNotes = [
-                max(24, root - 12),
-                max(31, root - 5),
-                root,
-            ]
-        default:
-            candidateNotes = [root, root + third, root + fifth, root + top]
-        }
-
-        let normalized = Set(candidateNotes)
-            .filter { 0...127 ~= $0 }
-            .sorted()
-
-        return normalized.map(UInt8.init)
-    }
-
-    private func chordToneOffsets(for quality: ChordQuality) -> [Int] {
-        switch quality {
-        case .major9:
-            return [0, 4, 7, 11, 14]
-        case .minor9:
-            return [0, 3, 7, 10, 14]
-        case .dominant13:
-            return [0, 4, 7, 10, 14, 21]
-        case .suspended2:
-            return [0, 2, 7, 14]
-        case .suspended4:
-            return [0, 5, 7, 10]
-        case .diminished7:
-            return [0, 3, 6, 9]
-        case .halfDiminished:
-            return [0, 3, 6, 10]
-        case .major7Sharp11:
-            return [0, 4, 7, 11, 18]
-        case .major6Add9:
-            return [0, 4, 7, 9, 14]
-        case .minor6:
-            return [0, 3, 7, 9]
-        }
-    }
-
     private func routingSummary(payloadCount: Int) -> String {
         let directTarget = selectedEndpoint.flatMap { _ in
             destinations.first(where: { $0.id == selectedDestinationID })?.name
@@ -363,18 +246,5 @@ final class LogicMIDIBridgeService: ObservableObject {
         var uniqueID = MIDIUniqueID()
         let status = MIDIObjectGetIntegerProperty(object, kMIDIPropertyUniqueID, &uniqueID)
         return status == noErr ? uniqueID : fallback
-    }
-}
-
-private struct MIDILayerPayload {
-    let channel: UInt8
-    let notes: [UInt8]
-    let velocity: UInt8
-}
-
-private extension Array {
-    subscript(safe index: Int) -> Element? {
-        guard indices.contains(index) else { return nil }
-        return self[index]
     }
 }

@@ -34,6 +34,7 @@ Native macOS presentation shell:
 - Vision + AVFoundation live hand-tracking path
 - Core MIDI bridge with virtual source and direct destination routing
 - standalone instrument catalog discovery for AU, VST/VST3, and library folders
+- standalone Audio Unit host service for direct local playback
 
 ## Planned Integrations
 
@@ -55,7 +56,7 @@ macOS first:
 - `Core MIDI` virtual sources and destinations
 - Audio Unit discovery
 - VST/VST3 filesystem discovery
-- Audio Unit discovery/hosting
+- Audio Unit hosting inside a shared `AVAudioEngine`
 - Logic Bridge layer routing orchestration channels into the DAW
 
 Cross-platform expansion:

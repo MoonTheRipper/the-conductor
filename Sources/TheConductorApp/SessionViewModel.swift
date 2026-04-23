@@ -44,7 +44,9 @@ final class SessionViewModel: ObservableObject {
             refreshCurrentInput()
         }
     }
-    @Published var selectedInstrumentID = ""
+    @Published var selectedInstrumentID = "" {
+        didSet { handleSelectedInstrumentChange() }
+    }
     @Published private(set) var midiDestinations: [MIDIDestinationDescriptor] = []
     @Published private(set) var midiStatusText = "MIDI bridge ready"
     @Published var selectedMIDIDestinationID = LogicMIDIBridgeService.noDestinationID {
@@ -62,12 +64,18 @@ final class SessionViewModel: ObservableObject {
     @Published private(set) var availableInstruments: [InstrumentDescriptor] = []
     @Published private(set) var libraryFolders: [LibraryFolderDescriptor] = []
     @Published private(set) var instrumentCatalogStatusText = "Standalone catalog idle"
+    @Published private(set) var standaloneHostStatusText = "Standalone host idle"
+    @Published private(set) var standaloneSupportText = "No instrument selected"
+    @Published private(set) var standaloneLoadedInstrumentName: String?
+    @Published private(set) var isStandaloneEngineRunning = false
+    @Published private(set) var isStandaloneInstrumentLoaded = false
 
     private var engine: PerformanceEngine
     private var frameClock: TimeInterval = 0
     private let liveTrackingService = VisionHandTrackingService()
     private let midiBridgeService = LogicMIDIBridgeService()
     private let standaloneCatalogService = StandaloneInstrumentCatalogService()
+    private let standaloneHostService = StandaloneAudioHostService()
     private var cancellables = Set<AnyCancellable>()
     private var loopPlaybackTimer: Timer?
     private var loopPlaybackIndex = 0
@@ -137,6 +145,10 @@ final class SessionViewModel: ObservableObject {
         midiBridgeService.channelMapDescription
     }
 
+    var isSelectedInstrumentHostableNow: Bool {
+        standaloneCatalogService.isHostableAudioUnit(selectedInstrumentID)
+    }
+
     func binding<Value>(_ keyPath: WritableKeyPath<DebugGestureState, Value>) -> Binding<Value> {
         Binding(
             get: { self.debugState[keyPath: keyPath] },
@@ -162,6 +174,10 @@ final class SessionViewModel: ObservableObject {
 
     func silenceMIDINotes() {
         midiBridgeService.silenceAllNotes()
+    }
+
+    func silenceStandaloneNotes() {
+        standaloneHostService.silenceAllNotes()
     }
 
     func refreshStandaloneInstruments() {
@@ -286,6 +302,8 @@ final class SessionViewModel: ObservableObject {
                 self.availableInstruments = instruments
                 if instruments.contains(where: { $0.id == self.selectedInstrumentID }) == false {
                     self.selectedInstrumentID = instruments.first?.id ?? ""
+                } else {
+                    self.configureStandaloneSelection()
                 }
             }
             .store(in: &cancellables)
@@ -303,6 +321,41 @@ final class SessionViewModel: ObservableObject {
                 self?.instrumentCatalogStatusText = statusText
             }
             .store(in: &cancellables)
+
+        standaloneHostService.$statusText
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] statusText in
+                self?.standaloneHostStatusText = statusText
+            }
+            .store(in: &cancellables)
+
+        standaloneHostService.$supportText
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] supportText in
+                self?.standaloneSupportText = supportText
+            }
+            .store(in: &cancellables)
+
+        standaloneHostService.$loadedInstrumentName
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] loadedInstrumentName in
+                self?.standaloneLoadedInstrumentName = loadedInstrumentName
+            }
+            .store(in: &cancellables)
+
+        standaloneHostService.$isEngineRunning
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] isEngineRunning in
+                self?.isStandaloneEngineRunning = isEngineRunning
+            }
+            .store(in: &cancellables)
+
+        standaloneHostService.$isInstrumentLoaded
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] isInstrumentLoaded in
+                self?.isStandaloneInstrumentLoaded = isInstrumentLoaded
+            }
+            .store(in: &cancellables)
     }
 
     private func handleTrackingModeChange() {
@@ -318,8 +371,12 @@ final class SessionViewModel: ObservableObject {
     private func handleRoutingModeChange() {
         switch routingMode {
         case .standaloneHost:
-            stopLoopPlayback(shouldSilence: true)
+            configureStandaloneSelection()
+            if performanceState.loopBuffer.isPlaying {
+                startLoopPlayback(using: performanceState.loopBuffer)
+            }
         case .logicBridge:
+            standaloneHostService.silenceAllNotes()
             midiBridgeService.refreshDestinations()
             if performanceState.loopBuffer.isPlaying {
                 startLoopPlayback(using: performanceState.loopBuffer)
@@ -374,27 +431,20 @@ final class SessionViewModel: ObservableObject {
         for event in events {
             switch event {
             case .chordCommitted(let chord, let interval, let dynamics, _):
-                guard routingMode == .logicBridge else { continue }
-                midiBridgeService.send(
+                playToActiveRoute(
                     chord: chord,
                     interval: interval,
-                    dynamics: dynamics,
-                    layers: performanceState.layers
+                    dynamics: dynamics
                 )
             case .transportChanged(let isPerforming, _):
                 if isPerforming == false {
-                    stopLoopPlayback(shouldSilence: routingMode == .logicBridge)
+                    stopLoopPlayback(shouldSilence: true)
                 }
             case .loopStateChanged(let loopBuffer, _):
-                guard routingMode == .logicBridge else {
-                    stopLoopPlayback()
-                    continue
-                }
-
                 if loopBuffer.isPlaying {
                     startLoopPlayback(using: loopBuffer)
                 } else {
-                    stopLoopPlayback()
+                    stopLoopPlayback(shouldSilence: true)
                 }
             }
         }
@@ -426,11 +476,10 @@ final class SessionViewModel: ObservableObject {
         guard loopBuffer.phrase.isEmpty == false else { return }
 
         let chord = loopBuffer.phrase[loopPlaybackIndex % loopBuffer.phrase.count]
-        midiBridgeService.send(
+        playToActiveRoute(
             chord: chord,
             interval: performanceState.interval,
-            dynamics: performanceState.dynamics,
-            layers: performanceState.layers
+            dynamics: performanceState.dynamics
         )
 
         loopPlaybackIndex = (loopPlaybackIndex + 1) % loopBuffer.phrase.count
@@ -443,7 +492,49 @@ final class SessionViewModel: ObservableObject {
 
         if shouldSilence {
             midiBridgeService.silenceAllNotes()
+            standaloneHostService.silenceAllNotes()
         }
+    }
+
+    private func playToActiveRoute(
+        chord: ChordSelection,
+        interval: IntervalChoice,
+        dynamics: Double
+    ) {
+        switch routingMode {
+        case .standaloneHost:
+            standaloneHostService.send(
+                chord: chord,
+                interval: interval,
+                dynamics: dynamics,
+                layers: performanceState.layers
+            )
+        case .logicBridge:
+            midiBridgeService.send(
+                chord: chord,
+                interval: interval,
+                dynamics: dynamics,
+                layers: performanceState.layers
+            )
+        }
+    }
+
+    private func handleSelectedInstrumentChange() {
+        configureStandaloneSelection()
+    }
+
+    private func configureStandaloneSelection() {
+        let selectedInstrument = selectedInstrument
+        let audioUnitDescription = selectedInstrument.flatMap {
+            standaloneCatalogService.audioUnitDescription(for: $0.id)
+        }
+        let supportSummary = standaloneCatalogService.standaloneCapabilitySummary(for: selectedInstrumentID)
+
+        standaloneHostService.configureSelection(
+            instrument: selectedInstrument,
+            audioUnitDescription: audioUnitDescription,
+            capabilitySummary: supportSummary
+        )
     }
 
     private func loopDuration(for loopBuffer: LoopBuffer) -> TimeInterval {

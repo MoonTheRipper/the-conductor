@@ -32,6 +32,9 @@ struct ContentView: View {
             VStack(alignment: .leading, spacing: 18) {
                 titlePanel
                 routingPanel
+                if viewModel.routingMode == .standaloneHost {
+                    standaloneHostPanel
+                }
                 if viewModel.routingMode == .logicBridge {
                     logicBridgePanel
                 }
@@ -94,6 +97,41 @@ struct ContentView: View {
             }
         }
         .panelStyle(fill: Color(red: 0.10, green: 0.17, blue: 0.16).opacity(0.55))
+    }
+
+    private var standaloneHostPanel: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            HStack {
+                Text("Standalone Host")
+                    .sectionTitle()
+                Spacer()
+                actionButton("Panic", color: .red, action: viewModel.silenceStandaloneNotes)
+            }
+
+            HStack(spacing: 10) {
+                statusChip(title: viewModel.isStandaloneEngineRunning ? "Engine Running" : "Engine Stopped", color: .mint)
+                statusChip(title: viewModel.isStandaloneInstrumentLoaded ? "Instrument Loaded" : "Discovery Only", color: .orange)
+            }
+
+            if let loadedInstrumentName = viewModel.standaloneLoadedInstrumentName {
+                Text("Loaded instrument: \(loadedInstrumentName)")
+                    .font(.system(size: 13, weight: .semibold, design: .rounded))
+                    .foregroundStyle(.white.opacity(0.92))
+            }
+
+            Text(viewModel.standaloneHostStatusText)
+                .font(.system(size: 12, weight: .medium, design: .rounded))
+                .foregroundStyle(.white.opacity(0.72))
+
+            Text(viewModel.standaloneSupportText)
+                .font(.system(size: 12, weight: .medium, design: .rounded))
+                .foregroundStyle(viewModel.isSelectedInstrumentHostableNow ? .mint : .yellow)
+
+            Text("Standalone playback currently hosts Audio Units directly. VST/VST3 and library entries remain discoverable, but they are not yet instantiated by the host.")
+                .font(.system(size: 12, weight: .medium, design: .rounded))
+                .foregroundStyle(.white.opacity(0.62))
+        }
+        .panelStyle(fill: Color(red: 0.10, green: 0.09, blue: 0.20).opacity(0.56))
     }
 
     private var logicBridgePanel: some View {
@@ -310,7 +348,11 @@ struct ContentView: View {
                         Text(instrument.name)
                             .font(.system(size: 14, weight: .semibold, design: .rounded))
                             .foregroundStyle(.white)
-                        Text("\(instrument.format.rawValue) · \(instrument.source)")
+                        Text(
+                            instrument.format == .audioUnit
+                                ? "\(instrument.format.rawValue) · hostable now · \(instrument.source)"
+                                : "\(instrument.format.rawValue) · discovery only · \(instrument.source)"
+                        )
                             .font(.system(size: 12, weight: .medium, design: .rounded))
                             .foregroundStyle(.white.opacity(0.62))
                     }

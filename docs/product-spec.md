@@ -43,9 +43,11 @@ Loop behavior:
 ## Standalone Sound Sources
 
 - discover installed Audio Units
+- host discovered Audio Unit instruments directly inside the app
 - discover installed VST/VST3 bundles from standard plugin folders
 - allow user-added library folders for sample sources
 - keep the selected target visible in the main control surface
+- label non-hostable targets clearly so discovery and playback status are not conflated
 
 ## Visual Language
 
@@ -57,6 +59,7 @@ Loop behavior:
 ## Next Milestones
 
 1. Tighten the live hand-tracking model so more than wrist position drives harmony.
-2. Add AU/VST3 standalone hosting behind the discovered catalog.
+2. Add per-layer AU assignment so multiple hosted sounds can render together.
 3. Add a progression recorder/exporter.
 4. Replace average-step loop playback with captured timing data.
+5. Add calibration controls for camera placement and pinch sensitivity.

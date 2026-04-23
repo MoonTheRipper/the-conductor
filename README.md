@@ -13,7 +13,7 @@ The current scaffold is intentionally biased toward the product direction we agr
 ## What Is In The Repo Now
 
 - `ConductorCore`: harmonic state, gesture mapping, loop logic, routing models
-- `TheConductorApp`: SwiftUI macOS shell with simulator/live tracking and a Logic Bridge panel
+- `TheConductorApp`: SwiftUI macOS shell with simulator/live tracking, a Logic Bridge panel, and a standalone AU host
 - Tests for chord mapping, loop capture, and transport muting
 - Product and architecture notes in `docs/`
 
@@ -27,6 +27,7 @@ The current app is a high-value scaffold, not the final audio app yet. It alread
 - live hand-tracking integration shape through Vision and AVFoundation
 - Core MIDI routing into Logic through a virtual source and optional direct destination send
 - real standalone instrument discovery for AU, VST/VST3, and user-added library folders
+- direct standalone Audio Unit playback for the currently selected AU target
 
 ## Current Product Modes
 
@@ -46,14 +47,16 @@ The current standalone catalog implementation exposes:
 - VST/VST3 discovery from standard macOS plugin folders
 - user-added sample/library folders inside the app UI
 - live target selection from the discovered catalog
+- direct Audio Unit hosting for discovered AU instrument entries
+- panic/all-notes-off control for standalone playback
 
 Logic's own internal Library patch browser is not a public automation target, so the product should treat Logic integration and standalone hosting as separate capabilities.
 
 ## Run Locally
 
 ```bash
-DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer swift test
-DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer swift build --product TheConductorApp
+swift test
+swift build --product TheConductorApp
 swift run TheConductorApp
 ```
 
@@ -70,7 +73,8 @@ sudo xcodebuild -runFirstLaunch
 ## Near-Term Build Order
 
 1. Tighten live hand gesture extraction beyond wrist-position tracking.
-2. Add actual AU/VST3 standalone hosting on top of the discovered catalog.
+2. Add per-layer standalone instrument assignment so multiple AU sounds can play at once.
 3. Add recorded MIDI export for committed gestures and loop phrases.
 4. Replace average-step loop playback with timestamp-accurate phrase timing.
-5. Move the audio/plugin core behind a portable C++ layer for cross-platform builds.
+5. Add calibration controls for camera-dependent gesture ranges and thresholds.
+6. Move the audio/plugin core behind a portable C++ layer for cross-platform builds.

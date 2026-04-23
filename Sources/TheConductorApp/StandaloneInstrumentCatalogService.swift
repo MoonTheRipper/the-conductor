@@ -22,6 +22,7 @@ final class StandaloneInstrumentCatalogService: ObservableObject {
 
     private let defaultsKey = "TheConductor.libraryFolders"
     private let fileManager = FileManager.default
+    private var audioUnitComponentsByID: [String: AVAudioUnitComponent] = [:]
 
     init() {
         loadLibraryFolders()
@@ -50,6 +51,29 @@ final class StandaloneInstrumentCatalogService: ObservableObject {
             }
 
         statusText = "Discovered \(audioUnits.count) AU, \(vsts.count + legacyVSTs.count) VST, \(libraryDescriptors.count) library targets"
+    }
+
+    func audioUnitDescription(for instrumentID: String) -> AudioComponentDescription? {
+        audioUnitComponentsByID[instrumentID]?.audioComponentDescription
+    }
+
+    func standaloneCapabilitySummary(for instrumentID: String) -> String {
+        guard let instrument = instruments.first(where: { $0.id == instrumentID }) else {
+            return "No instrument selected"
+        }
+
+        switch instrument.format {
+        case .audioUnit:
+            return "Hostable now in standalone mode"
+        case .vst3:
+            return "Discovered, but VST hosting is not implemented yet"
+        case .sampleLibrary:
+            return "Indexed for future sample hosting, but not directly playable yet"
+        }
+    }
+
+    func isHostableAudioUnit(_ instrumentID: String) -> Bool {
+        audioUnitComponentsByID[instrumentID] != nil
     }
 
     func addLibraryFolder() {
@@ -109,14 +133,17 @@ final class StandaloneInstrumentCatalogService: ObservableObject {
         ]
 
         let components = descriptions.flatMap { manager.components(matching: $0) }
+        audioUnitComponentsByID = [:]
 
         return components.map { component in
-            InstrumentDescriptor(
+            let descriptor = InstrumentDescriptor(
                 id: "au-\(component.audioComponentDescription.componentManufacturer)-\(component.audioComponentDescription.componentSubType)-\(component.name)",
                 name: component.name,
                 format: .audioUnit,
                 source: component.manufacturerName
             )
+            audioUnitComponentsByID[descriptor.id] = component
+            return descriptor
         }
     }
 

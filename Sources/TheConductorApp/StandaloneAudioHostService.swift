@@ -7,13 +7,31 @@ struct LayerHostedInstrumentSelection {
     let layerName: String
     let instrument: InstrumentDescriptor?
     let audioUnitDescription: AudioComponentDescription?
+    let sampleLibraryLoadPlan: SampleLibraryLoadPlan?
     let capabilitySummary: String
+}
+
+private enum HostedLayerKind {
+    case audioUnit
+    case sampler
+
+    var displayName: String {
+        switch self {
+        case .audioUnit:
+            return "Audio Unit"
+        case .sampler:
+            return "Sampler"
+        }
+    }
 }
 
 private struct HostedLayerSlot {
     let layerName: String
     let instrumentID: String
     let instrumentName: String
+    let hostedKind: HostedLayerKind
+    let busLabel: String
+    let hostSummaryText: String
     let midiInstrument: AVAudioUnitMIDIInstrument
 }
 
@@ -23,6 +41,7 @@ final class StandaloneAudioHostService: ObservableObject {
     @Published private(set) var supportText = "No layer assignments"
     @Published private(set) var loadedInstrumentName: String?
     @Published private(set) var loadedLayerNames: [String: String] = [:]
+    @Published private(set) var layerTopologyText: [String: String] = [:]
     @Published private(set) var isEngineRunning = false
     @Published private(set) var isInstrumentLoaded = false
 
@@ -52,29 +71,50 @@ final class StandaloneAudioHostService: ObservableObject {
                 continue
             }
 
-            guard let description = selection.audioUnitDescription else {
-                unloadSlot(for: selection.layerName)
-                unsupportedAssignments.append("\(selection.layerName): \(selection.capabilitySummary)")
-                continue
-            }
-
             if let existingSlot = layerSlotsByName[selection.layerName], existingSlot.instrumentID == instrument.id {
                 readyLayers.append(selection.layerName)
                 continue
             }
 
-            loadAudioUnit(
-                layerName: selection.layerName,
-                instrumentID: instrument.id,
-                instrumentName: instrument.name,
-                description: description
-            )
-            readyLayers.append(selection.layerName)
+            switch instrument.format {
+            case .audioUnit:
+                guard let description = selection.audioUnitDescription else {
+                    unloadSlot(for: selection.layerName)
+                    unsupportedAssignments.append("\(selection.layerName): \(selection.capabilitySummary)")
+                    continue
+                }
+
+                loadAudioUnit(
+                    layerName: selection.layerName,
+                    instrumentID: instrument.id,
+                    instrumentName: instrument.name,
+                    description: description
+                )
+                readyLayers.append(selection.layerName)
+            case .sampleLibrary:
+                guard let sampleLibraryLoadPlan = selection.sampleLibraryLoadPlan,
+                      sampleLibraryLoadPlan.isPlayableNow else {
+                    unloadSlot(for: selection.layerName)
+                    unsupportedAssignments.append("\(selection.layerName): \(selection.capabilitySummary)")
+                    continue
+                }
+
+                loadSampleLibrary(
+                    layerName: selection.layerName,
+                    instrumentID: instrument.id,
+                    instrumentName: instrument.name,
+                    loadPlan: sampleLibraryLoadPlan
+                )
+                readyLayers.append(selection.layerName)
+            case .vst3:
+                unloadSlot(for: selection.layerName)
+                unsupportedAssignments.append("\(selection.layerName): \(selection.capabilitySummary)")
+            }
         }
 
         if readyLayers.isEmpty {
             statusText = selections.contains(where: { $0.instrument != nil })
-                ? "No hostable Audio Units assigned to active layers"
+                ? "No hostable standalone targets assigned to active layers"
                 : "No standalone layer targets selected"
         } else {
             statusText = "Ready on \(readyLayers.count) layer\(readyLayers.count == 1 ? "" : "s")"
@@ -94,7 +134,7 @@ final class StandaloneAudioHostService: ObservableObject {
         layers: [LayerState]
     ) {
         guard layerSlotsByName.isEmpty == false else {
-            statusText = "No Audio Units loaded for standalone playback"
+            statusText = "No standalone targets loaded for playback"
             return
         }
 
@@ -177,7 +217,7 @@ final class StandaloneAudioHostService: ObservableObject {
     private func supportSummary(assignedCount: Int) -> String {
         let loadedCount = layerSlotsByName.count
         if assignedCount == 0 {
-            return "Assign Audio Units to orchestration layers to play them directly"
+            return "Assign Audio Units or library folders to orchestration layers to play them directly"
         }
         return "\(loadedCount)/\(assignedCount) assigned layer\(assignedCount == 1 ? "" : "s") loaded"
     }
@@ -200,9 +240,68 @@ final class StandaloneAudioHostService: ObservableObject {
             layerName: layerName,
             instrumentID: instrumentID,
             instrumentName: instrumentName,
+            hostedKind: .audioUnit,
+            busLabel: busLabel(for: layerName),
+            hostSummaryText: "Audio Unit -> \(busLabel(for: layerName))",
             midiInstrument: instrument
         )
         updatePublishedState()
+    }
+
+    private func loadSampleLibrary(
+        layerName: String,
+        instrumentID: String,
+        instrumentName: String,
+        loadPlan: SampleLibraryLoadPlan
+    ) {
+        unloadSlot(for: layerName)
+        startEngineIfNeeded()
+
+        let sampler = AVAudioUnitSampler()
+        engine.attach(sampler)
+        engine.connect(sampler, to: engine.mainMixerNode, format: nil)
+
+        do {
+            let resolvedHostSummary = try loadSampleLibrary(into: sampler, with: loadPlan)
+            sampler.overallGain = -4
+            startEngineIfNeeded()
+
+            layerSlotsByName[layerName] = HostedLayerSlot(
+                layerName: layerName,
+                instrumentID: instrumentID,
+                instrumentName: instrumentName,
+                hostedKind: .sampler,
+                busLabel: busLabel(for: layerName),
+                hostSummaryText: "\(resolvedHostSummary) -> \(busLabel(for: layerName))",
+                midiInstrument: sampler
+            )
+            updatePublishedState()
+        } catch {
+            engine.disconnectNodeOutput(sampler)
+            engine.detach(sampler)
+            statusText = "Failed to load \(instrumentName) on \(layerName): \(error.localizedDescription)"
+        }
+    }
+
+    private func loadSampleLibrary(
+        into sampler: AVAudioUnitSampler,
+        with loadPlan: SampleLibraryLoadPlan
+    ) throws -> String {
+        if let presetURL = loadPlan.presetURL {
+            do {
+                try sampler.loadInstrument(at: presetURL)
+                return "Sampler preset: \(presetURL.lastPathComponent)"
+            } catch {
+                if loadPlan.audioFileURLs.isEmpty == false {
+                    try sampler.loadAudioFiles(at: loadPlan.audioFileURLs)
+                    return "\(loadPlan.audioFileURLs.count) audio samples fallback"
+                }
+                throw error
+            }
+        }
+
+        try sampler.loadAudioFiles(at: loadPlan.audioFileURLs)
+        return loadPlan.hostSummaryText
     }
 
     private func unloadSlot(for layerName: String) {
@@ -232,13 +331,21 @@ final class StandaloneAudioHostService: ObservableObject {
         loadedLayerNames = Dictionary(
             uniqueKeysWithValues: layerSlotsByName.map { ($0.key, $0.value.instrumentName) }
         )
+        layerTopologyText = Dictionary(
+            uniqueKeysWithValues: layerSlotsByName.map { ($0.key, $0.value.hostSummaryText) }
+        )
         loadedInstrumentName = loadedLayerNames.isEmpty
             ? nil
             : loadedLayerNames.keys.sorted().compactMap { layerName in
-                guard let instrumentName = loadedLayerNames[layerName] else { return nil }
-                return "\(layerName): \(instrumentName)"
+                guard let slot = layerSlotsByName[layerName] else { return nil }
+                return "\(layerName): \(slot.instrumentName) (\(slot.hostedKind.displayName))"
             }.joined(separator: " · ")
         isInstrumentLoaded = loadedLayerNames.isEmpty == false
+    }
+
+    private func busLabel(for layerName: String) -> String {
+        let channel = Int(PerformanceLayerPlanner.channel(for: layerName) ?? 0) + 1
+        return "Main Mixer Bus · ch \(channel)"
     }
 
     private func startEngineIfNeeded() {

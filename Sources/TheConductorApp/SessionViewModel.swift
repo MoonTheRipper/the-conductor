@@ -75,6 +75,7 @@ final class SessionViewModel: ObservableObject {
     @Published private(set) var standaloneSupportText = "No instrument selected"
     @Published private(set) var standaloneLoadedInstrumentName: String?
     @Published private(set) var standaloneLoadedLayerNames: [String: String] = [:]
+    @Published private(set) var standaloneLayerTopologyText: [String: String] = [:]
     @Published private(set) var isStandaloneEngineRunning = false
     @Published private(set) var isStandaloneInstrumentLoaded = false
     @Published private(set) var loopTransportStatusText = "No loop captured"
@@ -129,7 +130,8 @@ final class SessionViewModel: ObservableObject {
         return availableInstruments.filter { instrument in
             instrument.name.localizedCaseInsensitiveContains(query) ||
                 instrument.source.localizedCaseInsensitiveContains(query) ||
-                instrument.format.rawValue.localizedCaseInsensitiveContains(query)
+                instrument.format.rawValue.localizedCaseInsensitiveContains(query) ||
+                standaloneCatalogService.catalogLine(for: instrument).localizedCaseInsensitiveContains(query)
         }
     }
 
@@ -200,7 +202,7 @@ final class SessionViewModel: ObservableObject {
     }
 
     var isSelectedInstrumentHostableNow: Bool {
-        standaloneCatalogService.isHostableAudioUnit(selectedInstrumentID)
+        standaloneCatalogService.isStandalonePlayable(selectedInstrumentID)
     }
 
     var standaloneLoadedLayerSummary: [String] {
@@ -290,9 +292,13 @@ final class SessionViewModel: ObservableObject {
         return standaloneCatalogService.standaloneCapabilitySummary(for: instrumentID)
     }
 
+    func loadedLayerTopologyText(for layerName: String) -> String? {
+        standaloneLayerTopologyText[layerName]
+    }
+
     func isLayerAssignmentHostable(_ layerName: String) -> Bool {
         let instrumentID = layerAssignedInstrumentIDs[layerName] ?? ""
-        return standaloneCatalogService.isHostableAudioUnit(instrumentID)
+        return standaloneCatalogService.isStandalonePlayable(instrumentID)
     }
 
     func instrumentCatalogLine(for instrument: InstrumentDescriptor) -> String {
@@ -317,6 +323,10 @@ final class SessionViewModel: ObservableObject {
 
     func silenceStandaloneNotes() {
         standaloneHostService.silenceAllNotes()
+    }
+
+    func unloadStandaloneAssignments() {
+        standaloneHostService.unloadAll()
     }
 
     func refreshStandaloneInstruments() {
@@ -545,6 +555,13 @@ final class SessionViewModel: ObservableObject {
             .receive(on: DispatchQueue.main)
             .sink { [weak self] loadedLayerNames in
                 self?.standaloneLoadedLayerNames = loadedLayerNames
+            }
+            .store(in: &cancellables)
+
+        standaloneHostService.$layerTopologyText
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] layerTopologyText in
+                self?.standaloneLayerTopologyText = layerTopologyText
             }
             .store(in: &cancellables)
 
@@ -783,14 +800,18 @@ final class SessionViewModel: ObservableObject {
             let audioUnitDescription = instrument.flatMap {
                 standaloneCatalogService.audioUnitDescription(for: $0.id)
             }
+            let sampleLibraryLoadPlan = instrument.flatMap {
+                standaloneCatalogService.sampleLibraryLoadPlan(for: $0.id)
+            }
             let supportSummary = instrumentID.isEmpty
-                ? "No Audio Unit assigned"
+                ? "No standalone target assigned"
                 : standaloneCatalogService.standaloneCapabilitySummary(for: instrumentID)
 
             return LayerHostedInstrumentSelection(
                 layerName: layerName,
                 instrument: instrument,
                 audioUnitDescription: audioUnitDescription,
+                sampleLibraryLoadPlan: sampleLibraryLoadPlan,
                 capabilitySummary: supportSummary
             )
         }

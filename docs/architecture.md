@@ -36,8 +36,9 @@ Native macOS presentation shell:
 - Core MIDI bridge with virtual source and direct destination routing
 - standalone instrument catalog discovery for AU, VST/VST3, and library folders
 - standalone Audio Unit host service for direct local playback with per-layer assignment
+- sampler-backed layer hosting for indexed library folders
 - loop transport and MIDI export controls in the desktop shell
-- searchable catalog UI and indexed library summaries for future sample hosting
+- searchable catalog UI and indexed library summaries for current sampler-backed hosting
 
 ## Planned Integrations
 
@@ -60,6 +61,7 @@ macOS first:
 - Audio Unit discovery
 - VST/VST3 filesystem discovery
 - Audio Unit hosting inside a shared `AVAudioEngine`
+- `AVAudioUnitSampler` loading from indexed library folders
 - Standard MIDI file export for captured phrases
 - Logic Bridge layer routing orchestration channels into the DAW
 

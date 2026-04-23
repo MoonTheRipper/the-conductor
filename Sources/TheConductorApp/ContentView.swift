@@ -108,6 +108,7 @@ struct ContentView: View {
                 Spacer()
                 actionButton("Assign Selected", color: .cyan, action: viewModel.assignSelectedInstrumentToAllLayers)
                 actionButton("Clear Layers", color: .orange, action: viewModel.clearLayerAssignments)
+                actionButton("Unload", color: .purple, action: viewModel.unloadStandaloneAssignments)
                 actionButton("Panic", color: .red, action: viewModel.silenceStandaloneNotes)
             }
 
@@ -134,7 +135,21 @@ struct ContentView: View {
                 layerAssignmentRow(layerName: layerName)
             }
 
-            Text("Standalone playback currently hosts Audio Units directly. VST/VST3 and library entries remain discoverable, but they are not yet instantiated by the host.")
+            if viewModel.standaloneLoadedLayerSummary.isEmpty == false {
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("Signal Paths")
+                        .font(.system(size: 12, weight: .bold, design: .rounded))
+                        .foregroundStyle(.white.opacity(0.58))
+
+                    ForEach(viewModel.standaloneLoadedLayerSummary, id: \.self) { line in
+                        Text(line)
+                            .font(.system(size: 12, weight: .medium, design: .rounded))
+                            .foregroundStyle(.white.opacity(0.72))
+                    }
+                }
+            }
+
+            Text("Standalone playback now hosts Audio Units and playable library folders directly. VST/VST3 entries remain discoverable, but they are not yet instantiated by the host.")
                 .font(.system(size: 12, weight: .medium, design: .rounded))
                 .foregroundStyle(.white.opacity(0.62))
         }
@@ -410,7 +425,7 @@ struct ContentView: View {
                 actionButton("Refresh", color: .cyan, action: viewModel.refreshStandaloneInstruments)
             }
 
-            TextField("Search instruments, makers, formats", text: $viewModel.instrumentSearchText)
+            TextField("Search instruments, makers, formats, hostability", text: $viewModel.instrumentSearchText)
                 .textFieldStyle(.roundedBorder)
 
             Picker("Instrument", selection: $viewModel.selectedInstrumentID) {
@@ -650,6 +665,12 @@ struct ContentView: View {
                 }
             }
             .pickerStyle(.menu)
+
+            if let topology = viewModel.loadedLayerTopologyText(for: layerName) {
+                Text(topology)
+                    .font(.system(size: 11, weight: .medium, design: .rounded))
+                    .foregroundStyle(.white.opacity(0.58))
+            }
         }
         .padding(12)
         .background(

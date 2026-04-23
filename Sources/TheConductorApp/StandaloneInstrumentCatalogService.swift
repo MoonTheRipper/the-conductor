@@ -6,7 +6,9 @@ import Foundation
 
 struct LibraryFolderDescriptor: Identifiable, Equatable {
     let path: String
-    let candidateFileCount: Int
+    let audioFileCount: Int
+    let presetFileCount: Int
+    let indexedOnlyFileCount: Int
 
     var id: String { path }
 
@@ -15,9 +17,51 @@ struct LibraryFolderDescriptor: Identifiable, Equatable {
     }
 
     var summaryText: String {
-        candidateFileCount == 0
-            ? "No indexed sample or preset files yet"
-            : "\(candidateFileCount) indexed sample or preset files"
+        if playableFileCount == 0 && indexedOnlyFileCount == 0 {
+            return "No indexed sample or preset files yet"
+        }
+
+        var parts: [String] = []
+        if audioFileCount > 0 {
+            parts.append("\(audioFileCount) audio")
+        }
+        if presetFileCount > 0 {
+            parts.append("\(presetFileCount) preset")
+        }
+        if indexedOnlyFileCount > 0 {
+            parts.append("\(indexedOnlyFileCount) indexed-only")
+        }
+        return parts.joined(separator: " · ")
+    }
+
+    var playableFileCount: Int {
+        audioFileCount + presetFileCount
+    }
+
+    var isPlayableNow: Bool {
+        playableFileCount > 0
+    }
+}
+
+struct SampleLibraryLoadPlan {
+    let displayName: String
+    let presetURL: URL?
+    let audioFileURLs: [URL]
+
+    var isPlayableNow: Bool {
+        presetURL != nil || audioFileURLs.isEmpty == false
+    }
+
+    var hostSummaryText: String {
+        if let presetURL {
+            return "Sampler preset: \(presetURL.lastPathComponent)"
+        }
+        if let firstAudio = audioFileURLs.first {
+            return audioFileURLs.count == 1
+                ? "Single audio sample: \(firstAudio.lastPathComponent)"
+                : "\(audioFileURLs.count) audio samples starting with \(firstAudio.lastPathComponent)"
+        }
+        return "No playable sample assets found"
     }
 }
 
@@ -30,9 +74,14 @@ final class StandaloneInstrumentCatalogService: ObservableObject {
     private let defaultsKey = "TheConductor.libraryFolders"
     private let fileManager = FileManager.default
     private var audioUnitComponentsByID: [String: AVAudioUnitComponent] = [:]
-    private let libraryCandidateExtensions: Set<String> = [
+    private let audioSampleExtensions: Set<String> = [
         "wav", "aif", "aiff", "caf", "mp3", "m4a",
-        "nki", "nkm", "exs", "sfz", "sf2", "aupreset",
+    ]
+    private let playablePresetExtensions: Set<String> = [
+        "aupreset", "exs", "sf2", "dls",
+    ]
+    private let indexedOnlyExtensions: Set<String> = [
+        "nki", "nkm", "sfz",
     ]
 
     init() {
@@ -45,10 +94,7 @@ final class StandaloneInstrumentCatalogService: ObservableObject {
         let vsts = discoverFilesystemPlugins(format: .vst3, directories: vst3Directories, suffix: "vst3")
         let legacyVSTs = discoverFilesystemPlugins(format: .vst3, directories: vstDirectories, suffix: "vst")
         let indexedLibraryFolders = libraryFolders.map { folder in
-            LibraryFolderDescriptor(
-                path: folder.path,
-                candidateFileCount: countLibraryCandidates(at: folder.path)
-            )
+            indexedLibraryFolder(at: folder.path)
         }
         libraryFolders = indexedLibraryFolders
 
@@ -69,7 +115,9 @@ final class StandaloneInstrumentCatalogService: ObservableObject {
                 return lhs.name.localizedCaseInsensitiveCompare(rhs.name) == .orderedAscending
             }
 
-        let indexedLibraryFiles = indexedLibraryFolders.reduce(0) { $0 + $1.candidateFileCount }
+        let indexedLibraryFiles = indexedLibraryFolders.reduce(0) {
+            $0 + $1.playableFileCount + $1.indexedOnlyFileCount
+        }
         statusText = "Discovered \(audioUnits.count) AU, \(vsts.count + legacyVSTs.count) VST, \(libraryDescriptors.count) library targets · indexed \(indexedLibraryFiles) files"
     }
 
@@ -89,7 +137,9 @@ final class StandaloneInstrumentCatalogService: ObservableObject {
             return "Discovered, but VST hosting is not implemented yet"
         case .sampleLibrary:
             if let folder = libraryFolders.first(where: { "library-\($0.path)" == instrumentID }) {
-                return "\(folder.summaryText) · indexed for future sample hosting"
+                return folder.isPlayableNow
+                    ? "\(folder.summaryText) · playable now through sampler hosting"
+                    : "\(folder.summaryText) · indexed for future sample hosting"
             }
             return "Indexed for future sample hosting, but not directly playable yet"
         }
@@ -97,6 +147,14 @@ final class StandaloneInstrumentCatalogService: ObservableObject {
 
     func isHostableAudioUnit(_ instrumentID: String) -> Bool {
         audioUnitComponentsByID[instrumentID] != nil
+    }
+
+    func isStandalonePlayable(_ instrumentID: String) -> Bool {
+        if isHostableAudioUnit(instrumentID) {
+            return true
+        }
+
+        return sampleLibraryLoadPlan(for: instrumentID)?.isPlayableNow == true
     }
 
     func catalogLine(for instrument: InstrumentDescriptor) -> String {
@@ -108,6 +166,19 @@ final class StandaloneInstrumentCatalogService: ObservableObject {
         case .sampleLibrary:
             return "\(instrument.format.rawValue) · \(standaloneCapabilitySummary(for: instrument.id))"
         }
+    }
+
+    func sampleLibraryLoadPlan(for instrumentID: String, maxAudioFiles: Int = 12) -> SampleLibraryLoadPlan? {
+        guard let folder = libraryFolders.first(where: { "library-\($0.path)" == instrumentID }) else {
+            return nil
+        }
+
+        let assets = collectLibraryAssets(at: folder.path, maxAudioFiles: maxAudioFiles)
+        return SampleLibraryLoadPlan(
+            displayName: folder.displayName,
+            presetURL: assets.playablePresetURLs.first,
+            audioFileURLs: Array(assets.audioSampleURLs.prefix(maxAudioFiles))
+        )
     }
 
     func addLibraryFolder() {
@@ -126,7 +197,7 @@ final class StandaloneInstrumentCatalogService: ObservableObject {
                 return
             }
 
-            libraryFolders.append(LibraryFolderDescriptor(path: path, candidateFileCount: 0))
+            libraryFolders.append(indexedLibraryFolder(at: path))
             persistLibraryFolders()
             refresh()
         }
@@ -140,7 +211,7 @@ final class StandaloneInstrumentCatalogService: ObservableObject {
 
     private func loadLibraryFolders() {
         let storedPaths = UserDefaults.standard.stringArray(forKey: defaultsKey) ?? []
-        libraryFolders = storedPaths.map { LibraryFolderDescriptor(path: $0, candidateFileCount: 0) }
+        libraryFolders = storedPaths.map { indexedLibraryFolder(at: $0) }
     }
 
     private func persistLibraryFolders() {
@@ -246,24 +317,59 @@ final class StandaloneInstrumentCatalogService: ObservableObject {
         }
     }
 
-    private func countLibraryCandidates(at path: String) -> Int {
+    private func indexedLibraryFolder(at path: String) -> LibraryFolderDescriptor {
+        let assets = collectLibraryAssets(at: path, maxAudioFiles: 0)
+        return LibraryFolderDescriptor(
+            path: path,
+            audioFileCount: assets.audioSampleCount,
+            presetFileCount: assets.playablePresetCount,
+            indexedOnlyFileCount: assets.indexedOnlyCount
+        )
+    }
+
+    private func collectLibraryAssets(at path: String, maxAudioFiles: Int) -> (
+        audioSampleURLs: [URL],
+        playablePresetURLs: [URL],
+        audioSampleCount: Int,
+        playablePresetCount: Int,
+        indexedOnlyCount: Int
+    ) {
         let url = URL(fileURLWithPath: path)
         guard let enumerator = fileManager.enumerator(
             at: url,
             includingPropertiesForKeys: [.isRegularFileKey],
             options: [.skipsHiddenFiles, .skipsPackageDescendants]
         ) else {
-            return 0
+            return ([], [], 0, 0, 0)
         }
 
-        var count = 0
+        var audioSampleURLs: [URL] = []
+        var presetURLs: [URL] = []
+        var audioSampleCount = 0
+        var playablePresetCount = 0
+        var indexedOnlyCount = 0
+
         for case let fileURL as URL in enumerator {
-            guard count < 5_000 else { break }
             let fileExtension = fileURL.pathExtension.lowercased()
-            if libraryCandidateExtensions.contains(fileExtension) {
-                count += 1
+            if audioSampleExtensions.contains(fileExtension) {
+                audioSampleCount += 1
+                if maxAudioFiles == 0 || audioSampleURLs.count < maxAudioFiles {
+                    audioSampleURLs.append(fileURL)
+                }
+            } else if playablePresetExtensions.contains(fileExtension) {
+                playablePresetCount += 1
+                presetURLs.append(fileURL)
+            } else if indexedOnlyExtensions.contains(fileExtension) {
+                indexedOnlyCount += 1
             }
         }
-        return count
+
+        return (
+            audioSampleURLs.sorted { $0.lastPathComponent.localizedCaseInsensitiveCompare($1.lastPathComponent) == .orderedAscending },
+            presetURLs.sorted { $0.lastPathComponent.localizedCaseInsensitiveCompare($1.lastPathComponent) == .orderedAscending },
+            audioSampleCount,
+            playablePresetCount,
+            indexedOnlyCount
+        )
     }
 }

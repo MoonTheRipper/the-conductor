@@ -28,6 +28,7 @@ The current app is a high-value scaffold, not the final audio app yet. It alread
 - Core MIDI routing into Logic through a virtual source and optional direct destination send
 - real standalone instrument discovery for AU, VST/VST3, and user-added library folders
 - direct standalone Audio Unit playback with one AU assignment per orchestration layer
+- sampler-backed playback for playable library folders assigned per layer
 - timestamp-accurate loop replay based on captured gesture commits
 - manual orchestration trims on top of the auto-generated layer mix
 - calibration controls for camera-centered gesture remapping
@@ -53,6 +54,7 @@ The current standalone catalog implementation exposes:
 - user-added sample/library folders inside the app UI
 - live target selection from the discovered catalog
 - per-layer Audio Unit hosting for discovered AU instrument entries
+- playable library-folder hosting through `AVAudioUnitSampler`
 - panic/all-notes-off control for standalone playback
 - searchable instrument browsing and assign-selected-to-all flow
 - indexed sample/library folder summaries so future sample hosting has useful source context
@@ -64,7 +66,7 @@ The current loop and control implementation exposes:
 - standard MIDI file export for the current loop
 - persistent calibration and layer-trim settings through `UserDefaults`
 
-Logic's own internal Library patch browser is not a public automation target, so the product should treat Logic integration and standalone hosting as separate capabilities.
+Logic's own internal Library patch browser is not a public automation target, so the product should treat Logic integration and standalone hosting as separate capabilities. Library-folder playback in this app is now handled by sampler loading from the user-indexed folders rather than by controlling Logic's proprietary Library UI.
 
 ## Run Locally
 
@@ -88,6 +90,6 @@ sudo xcodebuild -runFirstLaunch
 
 1. Tighten live hand gesture extraction beyond wrist-position tracking.
 2. Add richer live gesture inference for hand openness, orientation, and beat intent.
-3. Add sample-library playback behind the indexed library folders.
+3. Add per-layer effect or bus routing for richer standalone mixes.
 4. Add multi-track MIDI export with reusable tempo/clip metadata.
 5. Move the audio/plugin core behind a portable C++ layer for cross-platform builds.

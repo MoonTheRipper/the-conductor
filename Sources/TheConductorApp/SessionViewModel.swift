@@ -47,6 +47,12 @@ final class SessionViewModel: ObservableObject {
     @Published var selectedInstrumentID = "" {
         didSet { handleSelectedInstrumentChange() }
     }
+    @Published var calibration: GestureCalibration {
+        didSet {
+            persistCalibration()
+            refreshCurrentInput()
+        }
+    }
     @Published private(set) var midiDestinations: [MIDIDestinationDescriptor] = []
     @Published private(set) var midiStatusText = "MIDI bridge ready"
     @Published var selectedMIDIDestinationID = LogicMIDIBridgeService.noDestinationID {
@@ -69,6 +75,10 @@ final class SessionViewModel: ObservableObject {
     @Published private(set) var standaloneLoadedInstrumentName: String?
     @Published private(set) var isStandaloneEngineRunning = false
     @Published private(set) var isStandaloneInstrumentLoaded = false
+    @Published private(set) var loopTransportStatusText = "No loop captured"
+    @Published private(set) var exportStatusText = "No MIDI export yet"
+    @Published private(set) var layerMixMultipliers: [String: Double]
+    @Published private(set) var layerManualEnabled: [String: Bool]
 
     private var engine: PerformanceEngine
     private var frameClock: TimeInterval = 0
@@ -76,9 +86,16 @@ final class SessionViewModel: ObservableObject {
     private let midiBridgeService = LogicMIDIBridgeService()
     private let standaloneCatalogService = StandaloneInstrumentCatalogService()
     private let standaloneHostService = StandaloneAudioHostService()
+    private let loopExportService = MIDILoopExportService()
     private var cancellables = Set<AnyCancellable>()
-    private var loopPlaybackTimer: Timer?
-    private var loopPlaybackIndex = 0
+    private var loopPlaybackGeneration = 0
+    private var loopPlaybackWorkItems: [DispatchWorkItem] = []
+    private var loopCycleWorkItem: DispatchWorkItem?
+    private var isLoopPlaybackSuspended = false
+
+    private static let calibrationDefaultsKey = "TheConductor.gestureCalibration"
+    private static let layerMixDefaultsKey = "TheConductor.layerMixMultipliers"
+    private static let layerEnabledDefaultsKey = "TheConductor.layerManualEnabled"
 
     init() {
         let engine = PerformanceEngine(keyCenter: .c)
@@ -87,6 +104,9 @@ final class SessionViewModel: ObservableObject {
         self.chordLabels = engine.harmonyEngine.chordLabels
         self.intervalLabels = engine.harmonyEngine.intervalLabels
         self.debugState = .seed
+        self.calibration = Self.loadCalibration()
+        self.layerMixMultipliers = Self.loadLayerMixMultipliers()
+        self.layerManualEnabled = Self.loadLayerManualEnabled()
         bindLiveTracking()
         bindMIDIBridge()
         bindStandaloneCatalog()
@@ -95,6 +115,20 @@ final class SessionViewModel: ObservableObject {
 
     var selectedInstrument: InstrumentDescriptor? {
         availableInstruments.first { $0.id == selectedInstrumentID }
+    }
+
+    var effectiveLayers: [LayerState] {
+        performanceState.layers.map { layer in
+            LayerState(
+                name: layer.name,
+                mix: min(max(layer.mix * layerMixMultipliers[layer.name, default: 1.0], 0.0), 1.2),
+                isEnabled: layer.isEnabled && layerManualEnabled[layer.name, default: true]
+            )
+        }
+    }
+
+    var isLoopAvailable: Bool {
+        performanceState.loopBuffer.phrase.isEmpty == false
     }
 
     var routingDescription: String {
@@ -160,6 +194,37 @@ final class SessionViewModel: ObservableObject {
         )
     }
 
+    func calibrationBinding<Value>(_ keyPath: WritableKeyPath<GestureCalibration, Value>) -> Binding<Value> {
+        Binding(
+            get: { self.calibration[keyPath: keyPath] },
+            set: { newValue in
+                var updated = self.calibration
+                updated[keyPath: keyPath] = newValue
+                self.calibration = updated
+            }
+        )
+    }
+
+    func layerGainBinding(for layerName: String) -> Binding<Double> {
+        Binding(
+            get: { self.layerMixMultipliers[layerName, default: 1.0] },
+            set: { newValue in
+                self.layerMixMultipliers[layerName] = newValue
+                self.persistLayerControls()
+            }
+        )
+    }
+
+    func layerEnabledBinding(for layerName: String) -> Binding<Bool> {
+        Binding(
+            get: { self.layerManualEnabled[layerName, default: true] },
+            set: { newValue in
+                self.layerManualEnabled[layerName] = newValue
+                self.persistLayerControls()
+            }
+        )
+    }
+
     func startLiveTracking() {
         liveTrackingService.start()
     }
@@ -190,6 +255,48 @@ final class SessionViewModel: ObservableObject {
 
     func removeLibraryFolder(id: String) {
         standaloneCatalogService.removeLibraryFolder(id: id)
+    }
+
+    func pauseLoopPlayback() {
+        isLoopPlaybackSuspended = true
+        stopLoopPlayback(shouldSilence: true)
+        loopTransportStatusText = isLoopAvailable ? "Loop paused" : "No loop captured"
+    }
+
+    func restartLoopPlayback() {
+        guard isLoopAvailable else {
+            loopTransportStatusText = "No loop captured"
+            return
+        }
+
+        isLoopPlaybackSuspended = false
+        startLoopPlayback(using: performanceState.loopBuffer, force: true)
+    }
+
+    func clearLoop() {
+        isLoopPlaybackSuspended = false
+        stopLoopPlayback(shouldSilence: true)
+        engine.clearLoopBuffer()
+        performanceState = engine.state
+        loopTransportStatusText = "Loop cleared"
+    }
+
+    func resetCalibration() {
+        calibration = GestureCalibration()
+    }
+
+    func exportLoopAsMIDI() {
+        do {
+            let url = try loopExportService.export(
+                loopBuffer: performanceState.loopBuffer,
+                layers: effectiveLayers
+            )
+            exportStatusText = "Exported MIDI to \(url.lastPathComponent)"
+        } catch ExportError.cancelled {
+            exportStatusText = "MIDI export cancelled"
+        } catch {
+            exportStatusText = error.localizedDescription
+        }
     }
 
     func pulseCommit() {
@@ -374,6 +481,8 @@ final class SessionViewModel: ObservableObject {
             configureStandaloneSelection()
             if performanceState.loopBuffer.isPlaying {
                 startLoopPlayback(using: performanceState.loopBuffer)
+            } else {
+                standaloneHostService.silenceAllNotes()
             }
         case .logicBridge:
             standaloneHostService.silenceAllNotes()
@@ -420,8 +529,10 @@ final class SessionViewModel: ObservableObject {
     }
 
     private func apply(snapshot: GestureSnapshot) {
-        let events = engine.handle(snapshot: snapshot)
+        let calibratedSnapshot = calibration.apply(to: snapshot)
+        let events = engine.handle(snapshot: calibratedSnapshot)
         performanceState = engine.state
+        updateLoopTransportStatus()
         processPerformanceEvents(events)
     }
 
@@ -441,8 +552,10 @@ final class SessionViewModel: ObservableObject {
                     stopLoopPlayback(shouldSilence: true)
                 }
             case .loopStateChanged(let loopBuffer, _):
+                updateLoopTransportStatus(using: loopBuffer)
                 if loopBuffer.isPlaying {
-                    startLoopPlayback(using: loopBuffer)
+                    isLoopPlaybackSuspended = false
+                    startLoopPlayback(using: loopBuffer, force: true)
                 } else {
                     stopLoopPlayback(shouldSilence: true)
                 }
@@ -450,45 +563,81 @@ final class SessionViewModel: ObservableObject {
         }
     }
 
-    private func startLoopPlayback(using loopBuffer: LoopBuffer) {
+    private func startLoopPlayback(using loopBuffer: LoopBuffer, force: Bool = false) {
         stopLoopPlayback()
 
         guard loopBuffer.phrase.isEmpty == false else { return }
+        guard force || isLoopPlaybackSuspended == false else {
+            loopTransportStatusText = "Loop paused"
+            return
+        }
 
         let duration = loopDuration(for: loopBuffer)
-        let stepDuration = max(duration / Double(loopBuffer.phrase.count), 0.35)
+        loopPlaybackGeneration += 1
+        let generation = loopPlaybackGeneration
+        scheduleLoopCycle(
+            using: loopBuffer,
+            generation: generation,
+            cycleDuration: duration
+        )
+        loopTransportStatusText = "Looping \(loopBuffer.phrase.count) events over \(String(format: "%.2f", duration))s"
+    }
 
-        loopPlaybackIndex = 0
-        sendCurrentLoopChord(from: loopBuffer)
+    private func scheduleLoopCycle(
+        using loopBuffer: LoopBuffer,
+        generation: Int,
+        cycleDuration: TimeInterval
+    ) {
+        loopPlaybackWorkItems.removeAll(keepingCapacity: true)
+        let loopStart = loopBuffer.startTimestamp ?? loopBuffer.phrase.first?.timestamp ?? 0.0
 
-        loopPlaybackTimer = Timer.scheduledTimer(withTimeInterval: stepDuration, repeats: true) { [weak self] _ in
+        for phraseEvent in loopBuffer.phrase {
+            let offset = min(
+                max(phraseEvent.timestamp - loopStart, 0.0),
+                max(cycleDuration - 0.01, 0.0)
+            )
+
+            let workItem = DispatchWorkItem { [weak self] in
+                Task { @MainActor in
+                    guard let self, self.loopPlaybackGeneration == generation else { return }
+                    self.playLoopPhraseEvent(phraseEvent)
+                }
+            }
+
+            loopPlaybackWorkItems.append(workItem)
+            DispatchQueue.main.asyncAfter(deadline: .now() + offset, execute: workItem)
+        }
+
+        let cycleWorkItem = DispatchWorkItem { [weak self] in
             Task { @MainActor in
-                self?.sendCurrentLoopChord(from: loopBuffer)
+                guard let self, self.loopPlaybackGeneration == generation else { return }
+                guard self.isLoopPlaybackSuspended == false else { return }
+                self.scheduleLoopCycle(
+                    using: loopBuffer,
+                    generation: generation,
+                    cycleDuration: cycleDuration
+                )
             }
         }
 
-        if let loopPlaybackTimer {
-            RunLoop.main.add(loopPlaybackTimer, forMode: .common)
-        }
+        loopCycleWorkItem = cycleWorkItem
+        DispatchQueue.main.asyncAfter(deadline: .now() + cycleDuration, execute: cycleWorkItem)
     }
 
-    private func sendCurrentLoopChord(from loopBuffer: LoopBuffer) {
-        guard loopBuffer.phrase.isEmpty == false else { return }
-
-        let chord = loopBuffer.phrase[loopPlaybackIndex % loopBuffer.phrase.count]
+    private func playLoopPhraseEvent(_ phraseEvent: LoopPhraseEvent) {
         playToActiveRoute(
-            chord: chord,
-            interval: performanceState.interval,
-            dynamics: performanceState.dynamics
+            chord: phraseEvent.chord,
+            interval: phraseEvent.interval,
+            dynamics: phraseEvent.dynamics
         )
-
-        loopPlaybackIndex = (loopPlaybackIndex + 1) % loopBuffer.phrase.count
     }
 
     private func stopLoopPlayback(shouldSilence: Bool = false) {
-        loopPlaybackTimer?.invalidate()
-        loopPlaybackTimer = nil
-        loopPlaybackIndex = 0
+        loopPlaybackGeneration += 1
+        loopPlaybackWorkItems.forEach { $0.cancel() }
+        loopPlaybackWorkItems.removeAll()
+        loopCycleWorkItem?.cancel()
+        loopCycleWorkItem = nil
 
         if shouldSilence {
             midiBridgeService.silenceAllNotes()
@@ -507,14 +656,14 @@ final class SessionViewModel: ObservableObject {
                 chord: chord,
                 interval: interval,
                 dynamics: dynamics,
-                layers: performanceState.layers
+                layers: effectiveLayers
             )
         case .logicBridge:
             midiBridgeService.send(
                 chord: chord,
                 interval: interval,
                 dynamics: dynamics,
-                layers: performanceState.layers
+                layers: effectiveLayers
             )
         }
     }
@@ -545,7 +694,73 @@ final class SessionViewModel: ObservableObject {
             capturedDuration = 0.0
         }
 
-        let fallbackDuration = Double(max(loopBuffer.phrase.count, 1)) * 0.75
-        return max(capturedDuration, fallbackDuration)
+        let phraseSpan: TimeInterval
+        if let firstEvent = loopBuffer.phrase.first, let lastEvent = loopBuffer.phrase.last {
+            phraseSpan = max(lastEvent.timestamp - firstEvent.timestamp, 0.0)
+        } else {
+            phraseSpan = 0.0
+        }
+
+        let fallbackDuration = max(Double(max(loopBuffer.phrase.count, 1)) * 0.75, phraseSpan + 0.45)
+        return max(capturedDuration, fallbackDuration, 0.45)
+    }
+
+    private func updateLoopTransportStatus(using loopBuffer: LoopBuffer? = nil) {
+        let loopBuffer = loopBuffer ?? performanceState.loopBuffer
+
+        if loopBuffer.isRecording {
+            loopTransportStatusText = "Recording loop"
+        } else if loopBuffer.isPlaying {
+            loopTransportStatusText = isLoopPlaybackSuspended
+                ? "Loop paused"
+                : "Looping \(loopBuffer.phrase.count) events"
+        } else if loopBuffer.phrase.isEmpty {
+            loopTransportStatusText = "No loop captured"
+        } else {
+            loopTransportStatusText = "Loop ready with \(loopBuffer.phrase.count) events"
+        }
+    }
+
+    private func persistCalibration() {
+        guard let data = try? JSONEncoder().encode(calibration) else { return }
+        UserDefaults.standard.set(data, forKey: Self.calibrationDefaultsKey)
+    }
+
+    private func persistLayerControls() {
+        UserDefaults.standard.set(layerMixMultipliers, forKey: Self.layerMixDefaultsKey)
+        UserDefaults.standard.set(layerManualEnabled, forKey: Self.layerEnabledDefaultsKey)
+    }
+
+    private static func loadCalibration() -> GestureCalibration {
+        guard
+            let data = UserDefaults.standard.data(forKey: calibrationDefaultsKey),
+            let calibration = try? JSONDecoder().decode(GestureCalibration.self, from: data)
+        else {
+            return GestureCalibration()
+        }
+
+        return calibration
+    }
+
+    private static func loadLayerMixMultipliers() -> [String: Double] {
+        var merged = defaultLayerMixMultipliers
+        let stored = UserDefaults.standard.dictionary(forKey: layerMixDefaultsKey) as? [String: Double] ?? [:]
+        merged.merge(stored) { _, stored in stored }
+        return merged
+    }
+
+    private static func loadLayerManualEnabled() -> [String: Bool] {
+        var merged = defaultLayerManualEnabled
+        let stored = UserDefaults.standard.dictionary(forKey: layerEnabledDefaultsKey) as? [String: Bool] ?? [:]
+        merged.merge(stored) { _, stored in stored }
+        return merged
+    }
+
+    private static var defaultLayerMixMultipliers: [String: Double] {
+        Dictionary(uniqueKeysWithValues: PerformanceLayerPlanner.layerChannels.map { ($0.name, 1.0) })
+    }
+
+    private static var defaultLayerManualEnabled: [String: Bool] {
+        Dictionary(uniqueKeysWithValues: PerformanceLayerPlanner.layerChannels.map { ($0.name, true) })
     }
 }

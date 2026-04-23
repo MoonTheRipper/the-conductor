@@ -196,6 +196,29 @@ public struct ChordSelection: Equatable, Identifiable, Sendable {
     }
 }
 
+public struct LoopPhraseEvent: Equatable, Identifiable, Sendable {
+    public var chord: ChordSelection
+    public var interval: IntervalChoice
+    public var dynamics: Double
+    public var timestamp: TimeInterval
+
+    public init(
+        chord: ChordSelection,
+        interval: IntervalChoice,
+        dynamics: Double,
+        timestamp: TimeInterval
+    ) {
+        self.chord = chord
+        self.interval = interval
+        self.dynamics = dynamics
+        self.timestamp = timestamp
+    }
+
+    public var id: String {
+        "\(timestamp)-\(chord.symbol)-\(interval.rawValue)"
+    }
+}
+
 public struct PlotPosition: Equatable, Sendable {
     public var angle: Double
     public var radius: Double
@@ -209,14 +232,14 @@ public struct PlotPosition: Equatable, Sendable {
 }
 
 public struct LoopBuffer: Equatable, Sendable {
-    public var phrase: [ChordSelection]
+    public var phrase: [LoopPhraseEvent]
     public var isRecording: Bool
     public var isPlaying: Bool
     public var startTimestamp: TimeInterval?
     public var endTimestamp: TimeInterval?
 
     public init(
-        phrase: [ChordSelection] = [],
+        phrase: [LoopPhraseEvent] = [],
         isRecording: Bool = false,
         isPlaying: Bool = false,
         startTimestamp: TimeInterval? = nil,

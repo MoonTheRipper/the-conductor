@@ -28,6 +28,10 @@ The current app is a high-value scaffold, not the final audio app yet. It alread
 - Core MIDI routing into Logic through a virtual source and optional direct destination send
 - real standalone instrument discovery for AU, VST/VST3, and user-added library folders
 - direct standalone Audio Unit playback for the currently selected AU target
+- timestamp-accurate loop replay based on captured gesture commits
+- manual orchestration trims on top of the auto-generated layer mix
+- calibration controls for camera-centered gesture remapping
+- MIDI export for the captured loop phrase
 
 ## Current Product Modes
 
@@ -49,6 +53,13 @@ The current standalone catalog implementation exposes:
 - live target selection from the discovered catalog
 - direct Audio Unit hosting for discovered AU instrument entries
 - panic/all-notes-off control for standalone playback
+
+The current loop and control implementation exposes:
+
+- loop capture with recorded event timestamps, interval focus, and dynamics
+- restart, pause, and clear transport controls in the app UI
+- standard MIDI file export for the current loop
+- persistent calibration and layer-trim settings through `UserDefaults`
 
 Logic's own internal Library patch browser is not a public automation target, so the product should treat Logic integration and standalone hosting as separate capabilities.
 
@@ -74,7 +85,6 @@ sudo xcodebuild -runFirstLaunch
 
 1. Tighten live hand gesture extraction beyond wrist-position tracking.
 2. Add per-layer standalone instrument assignment so multiple AU sounds can play at once.
-3. Add recorded MIDI export for committed gestures and loop phrases.
-4. Replace average-step loop playback with timestamp-accurate phrase timing.
-5. Add calibration controls for camera-dependent gesture ranges and thresholds.
-6. Move the audio/plugin core behind a portable C++ layer for cross-platform builds.
+3. Add richer live gesture inference for hand openness, orientation, and beat intent.
+4. Add multi-track MIDI export with reusable tempo/clip metadata.
+5. Move the audio/plugin core behind a portable C++ layer for cross-platform builds.

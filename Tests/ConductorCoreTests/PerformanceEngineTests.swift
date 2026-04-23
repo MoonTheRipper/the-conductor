@@ -31,6 +31,8 @@ struct PerformanceEngineTests {
         #expect(engine.state.loopBuffer.isRecording == false)
         #expect(engine.state.loopBuffer.isPlaying)
         #expect(engine.state.loopBuffer.phrase.count == 1)
+        #expect(engine.state.loopBuffer.phrase.first?.chord.symbol == "Cmaj9")
+        #expect(engine.state.loopBuffer.phrase.first?.timestamp == 1.0)
         #expect(startEvents.contains {
             if case .loopStateChanged = $0 { return true }
             return false
@@ -81,6 +83,20 @@ struct PerformanceEngineTests {
             }
             return false
         })
+    }
+
+    @Test
+    func repeatedChordCanStillBeCapturedAfterTimeGap() {
+        var engine = PerformanceEngine(keyCenter: .c)
+
+        _ = engine.handle(snapshot: snapshot(leftPinch: 0.95, rightPinch: 0.95, timestamp: 0.0))
+        _ = engine.handle(snapshot: snapshot(rightPinch: 0.95, timestamp: 0.8))
+        _ = engine.handle(snapshot: snapshot(rightPinch: 0.95, timestamp: 1.35))
+        _ = engine.handle(snapshot: snapshot(leftPinch: 0.95, rightPinch: 0.95, timestamp: 2.0))
+
+        #expect(engine.state.loopBuffer.phrase.count == 2)
+        #expect(engine.state.loopBuffer.phrase[0].timestamp == 0.8)
+        #expect(engine.state.loopBuffer.phrase[1].timestamp == 1.35)
     }
 
     private func snapshot(

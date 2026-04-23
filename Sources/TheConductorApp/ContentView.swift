@@ -38,6 +38,7 @@ struct ContentView: View {
                 if viewModel.routingMode == .logicBridge {
                     logicBridgePanel
                 }
+                loopTransportPanel
                 orchestraPanel
                 trackingPanel
                 instrumentPanel
@@ -191,19 +192,32 @@ struct ContentView: View {
 
     private var orchestraPanel: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Text("Orchestration")
-                .sectionTitle()
+            HStack {
+                Text("Orchestration")
+                    .sectionTitle()
+                Spacer()
+                Text("Manual trims")
+                    .font(.system(size: 11, weight: .bold, design: .rounded))
+                    .foregroundStyle(.white.opacity(0.46))
+            }
 
-            ForEach(viewModel.performanceState.layers) { layer in
+            ForEach(viewModel.effectiveLayers) { layer in
                 VStack(alignment: .leading, spacing: 6) {
                     HStack {
-                        Text(layer.name)
-                            .font(.system(size: 13, weight: .semibold, design: .rounded))
-                            .foregroundStyle(.white.opacity(layer.isEnabled ? 0.95 : 0.45))
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(layer.name)
+                                .font(.system(size: 13, weight: .semibold, design: .rounded))
+                                .foregroundStyle(.white.opacity(layer.isEnabled ? 0.95 : 0.45))
+                            if let automaticLayer = viewModel.performanceState.layers.first(where: { $0.name == layer.name }) {
+                                Text("Auto \(Int(automaticLayer.mix * 100))% -> Output \(Int(layer.mix * 100))%")
+                                    .font(.system(size: 11, weight: .medium, design: .rounded))
+                                    .foregroundStyle(.white.opacity(0.52))
+                            }
+                        }
                         Spacer()
-                        Text("\(Int(layer.mix * 100))%")
-                            .font(.system(size: 12, weight: .bold, design: .rounded))
-                            .foregroundStyle(.white.opacity(0.7))
+                        Toggle("", isOn: viewModel.layerEnabledBinding(for: layer.name))
+                            .toggleStyle(.switch)
+                            .labelsHidden()
                     }
 
                     GeometryReader { proxy in
@@ -217,6 +231,9 @@ struct ContentView: View {
                         }
                     }
                     .frame(height: 10)
+
+                    Slider(value: viewModel.layerGainBinding(for: layer.name), in: 0...1.5)
+                        .tint(layer.isEnabled ? .orange : .gray)
                 }
             }
         }
@@ -240,8 +257,40 @@ struct ContentView: View {
             } else {
                 simulatorPanel
             }
+
+            calibrationPanel
         }
         .panelStyle(fill: Color(red: 0.08, green: 0.14, blue: 0.22).opacity(0.56))
+    }
+
+    private var loopTransportPanel: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            HStack {
+                Text("Loop Transport")
+                    .sectionTitle()
+                Spacer()
+                actionButton("Export MIDI", color: .cyan, action: viewModel.exportLoopAsMIDI)
+            }
+
+            Text(viewModel.loopTransportStatusText)
+                .font(.system(size: 13, weight: .semibold, design: .rounded))
+                .foregroundStyle(.white.opacity(0.88))
+
+            Text(viewModel.exportStatusText)
+                .font(.system(size: 12, weight: .medium, design: .rounded))
+                .foregroundStyle(.white.opacity(0.62))
+
+            HStack(spacing: 10) {
+                actionButton("Restart", color: .mint, action: viewModel.restartLoopPlayback)
+                actionButton("Pause", color: .orange, action: viewModel.pauseLoopPlayback)
+                actionButton("Clear", color: .red, action: viewModel.clearLoop)
+            }
+
+            Text("Loop playback now follows the recorded event timing instead of dividing the phrase evenly. Export writes the current loop as a standard MIDI clip.")
+                .font(.system(size: 12, weight: .medium, design: .rounded))
+                .foregroundStyle(.white.opacity(0.62))
+        }
+        .panelStyle(fill: Color(red: 0.08, green: 0.19, blue: 0.15).opacity(0.54))
     }
 
     private var simulatorPanel: some View {
@@ -309,6 +358,35 @@ struct ContentView: View {
                 liveTip("Both hands pinched toggles loop capture.")
                 liveTip("Left-hand position selects interval focus.")
             }
+        }
+        .padding(16)
+        .background(
+            RoundedRectangle(cornerRadius: 20, style: .continuous)
+                .fill(Color.black.opacity(0.14))
+        )
+    }
+
+    private var calibrationPanel: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack {
+                Text("Calibration")
+                    .font(.system(size: 15, weight: .bold, design: .rounded))
+                    .foregroundStyle(.white)
+                Spacer()
+                actionButton("Reset", color: .red, action: viewModel.resetCalibration)
+            }
+
+            sliderRow(title: "Center X", value: viewModel.calibrationBinding(\.centerX), range: -0.4...0.4)
+            sliderRow(title: "Center Y", value: viewModel.calibrationBinding(\.centerY), range: -0.4...0.4)
+            sliderRow(title: "Horizontal Reach", value: viewModel.calibrationBinding(\.horizontalReach), range: 0.45...1.4)
+            sliderRow(title: "Vertical Reach", value: viewModel.calibrationBinding(\.verticalReach), range: 0.45...1.4)
+            sliderRow(title: "Pinch Floor", value: viewModel.calibrationBinding(\.pinchFloor), range: 0...0.5)
+            sliderRow(title: "Pinch Ceiling", value: viewModel.calibrationBinding(\.pinchCeiling), range: 0.45...1.0)
+            sliderRow(title: "Velocity Scale", value: viewModel.calibrationBinding(\.velocityScale), range: 0.45...1.75)
+
+            Text("Calibration remaps the incoming camera gesture values before the harmonic engine sees them. Use it to compensate for camera placement and pinch sensitivity.")
+                .font(.system(size: 12, weight: .medium, design: .rounded))
+                .foregroundStyle(.white.opacity(0.58))
         }
         .padding(16)
         .background(

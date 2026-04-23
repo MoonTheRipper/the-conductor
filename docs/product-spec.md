@@ -32,6 +32,7 @@ Loop behavior:
 - second toggle closes the loop and starts playback
 - third toggle clears the loop
 - when Logic Bridge mode is active, loop playback is emitted back to MIDI channels
+- loop playback should preserve the recorded event timing rather than flattening the phrase
 
 ## Harmony Engine Goals
 
@@ -55,11 +56,12 @@ Loop behavior:
 - chord orbit and interval orbit as distinct circles
 - visible current marker, not just labels
 - current chord, interval, loop state, and layer mix visible at a glance
+- layer trims, loop transport, and calibration controls exposed without leaving the main surface
 
 ## Next Milestones
 
 1. Tighten the live hand-tracking model so more than wrist position drives harmony.
 2. Add per-layer AU assignment so multiple hosted sounds can render together.
-3. Add a progression recorder/exporter.
-4. Replace average-step loop playback with captured timing data.
-5. Add calibration controls for camera placement and pinch sensitivity.
+3. Add multi-track MIDI export options and clip metadata.
+4. Improve beat-intent detection from the live camera path.
+5. Add sample-library playback behind the existing library-folder index.

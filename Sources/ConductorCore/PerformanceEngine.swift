@@ -50,6 +50,12 @@ public struct PerformanceEngine: Sendable {
         return events
     }
 
+    public mutating func clearLoopBuffer() {
+        state.loopBuffer = LoopBuffer()
+        updateLayers(with: GestureSnapshot(leftHand: nil, rightHand: nil, timestamp: 0))
+        state.activityText = "Loop cleared"
+    }
+
     private mutating func updatePreviewState(with snapshot: GestureSnapshot) {
         if let rightHand = snapshot.rightHand {
             let (previewChord, chordPlot) = harmonyEngine.chordSelection(for: rightHand.position)
@@ -138,9 +144,14 @@ public struct PerformanceEngine: Sendable {
     }
 
     private mutating func handleCommit(with snapshot: GestureSnapshot) -> [PerformanceEvent] {
+        let isLoopToggleGesture =
+            (snapshot.leftHand?.pinch ?? 0.0) > 0.88 &&
+            (snapshot.rightHand?.pinch ?? 0.0) > 0.88
+
         guard
             let rightHand = snapshot.rightHand,
             rightHand.pinch > 0.82,
+            isLoopToggleGesture == false,
             snapshot.timestamp - lastCommitTimestamp > 0.25
         else {
             return []
@@ -151,8 +162,28 @@ public struct PerformanceEngine: Sendable {
         state.currentChord = state.previewChord
         state.isPerforming = true
 
-        if state.loopBuffer.isRecording, state.loopBuffer.phrase.last != state.currentChord {
-            state.loopBuffer.phrase.append(state.currentChord)
+        if state.loopBuffer.isRecording {
+            let phraseEvent = LoopPhraseEvent(
+                chord: state.currentChord,
+                interval: state.interval,
+                dynamics: state.dynamics,
+                timestamp: snapshot.timestamp
+            )
+
+            let shouldAppend: Bool
+            if let lastEvent = state.loopBuffer.phrase.last {
+                let isRepeatedChord = lastEvent.chord == phraseEvent.chord
+                let isRepeatedInterval = lastEvent.interval == phraseEvent.interval
+                let isRepeatedDynamics = abs(lastEvent.dynamics - phraseEvent.dynamics) < 0.08
+                let elapsed = phraseEvent.timestamp - lastEvent.timestamp
+                shouldAppend = (isRepeatedChord && isRepeatedInterval && isRepeatedDynamics) == false || elapsed > 0.4
+            } else {
+                shouldAppend = true
+            }
+
+            if shouldAppend {
+                state.loopBuffer.phrase.append(phraseEvent)
+            }
         }
 
         state.activityText = "Committed \(state.currentChord.symbol) with \(state.interval.spokenName.lowercased()) focus"

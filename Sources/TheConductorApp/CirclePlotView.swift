@@ -12,11 +12,10 @@ struct CirclePlotView: View {
         VStack(alignment: .leading, spacing: 14) {
             VStack(alignment: .leading, spacing: 4) {
                 Text(title)
-                    .font(.system(size: 24, weight: .bold, design: .rounded))
-                    .foregroundStyle(.white)
+                    .font(.title3.weight(.semibold))
                 Text(subtitle)
-                    .font(.system(size: 13, weight: .medium, design: .rounded))
-                    .foregroundStyle(.white.opacity(0.65))
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
             }
 
             GeometryReader { proxy in
@@ -31,8 +30,8 @@ struct CirclePlotView: View {
 
                     ForEach(Array(labels.enumerated()), id: \.offset) { index, label in
                         Text(label)
-                            .font(.system(size: 12, weight: .semibold, design: .rounded))
-                            .foregroundStyle(.white.opacity(0.88))
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(.primary)
                             .position(labelPosition(index: index, size: drawingSize))
                     }
                 }
@@ -41,7 +40,7 @@ struct CirclePlotView: View {
             }
             .frame(minHeight: 330)
         }
-        .panelStyle(fill: Color.white.opacity(0.06))
+        .conductorCardStyle()
     }
 
     private func drawGrid(in context: inout GraphicsContext, size: CGSize) {
@@ -58,7 +57,7 @@ struct CirclePlotView: View {
                 width: circleRadius * 2,
                 height: circleRadius * 2
             ))
-            context.stroke(circle, with: .color(Color.white.opacity(0.12)), lineWidth: 1.2)
+            context.stroke(circle, with: .color(Color.secondary.opacity(0.25)), lineWidth: 1.2)
         }
 
         let sectorSize = (2.0 * Double.pi) / Double(labels.count)
@@ -72,7 +71,7 @@ struct CirclePlotView: View {
             var line = Path()
             line.move(to: center)
             line.addLine(to: edgePoint)
-            context.stroke(line, with: .color(Color.white.opacity(0.08)), lineWidth: 1.0)
+            context.stroke(line, with: .color(Color.secondary.opacity(0.18)), lineWidth: 1.0)
         }
     }
 

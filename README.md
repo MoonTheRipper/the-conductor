@@ -30,6 +30,7 @@ The current app is a working local MVP for the product direction we agreed on. I
 - direct standalone Audio Unit playback with one AU assignment per orchestration layer
 - sampler-backed playback for playable library folders assigned per layer
 - per-layer preset or sample-target selection inside each assigned library folder
+- articulation-aware library target matching that can follow each layer's voicing style automatically
 - per-layer articulation, register shift, note density, velocity bias, and note-length shaping
 - timestamp-accurate loop replay based on captured gesture commits
 - manual orchestration trims on top of the auto-generated layer mix
@@ -66,6 +67,7 @@ The current standalone catalog implementation exposes:
 - panic/all-notes-off control for standalone playback
 - searchable instrument browsing and assign-selected-to-all flow
 - indexed sample/library folder summaries and selectable playable targets inside each folder
+- automatic target selection inside library folders based on the current layer articulation
 - per-layer bus and effect routing for richer standalone mixes
 - shared performance shaping so standalone playback, Logic MIDI, and exported MIDI all honor the same layer voicing controls
 

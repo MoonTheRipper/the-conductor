@@ -82,6 +82,7 @@ struct SampleLibraryPlayableTarget: Identifiable, Equatable {
     let kind: Kind
     let displayName: String
     let detailText: String
+    let articulationFamily: SampleLibraryArticulationFamily
     let presetURL: URL?
     let audioFileURLs: [URL]
 
@@ -229,6 +230,15 @@ final class StandaloneInstrumentCatalogService: ObservableObject {
         let targets = buildPlayableTargets(at: folder.path, maxAudioFilesPerTarget: maxAudioFilesPerTarget)
         playableTargetsByLibraryPath[folder.path] = targets
         return targets
+    }
+
+    func recommendedSampleLibraryTarget(
+        for instrumentID: String,
+        articulation: LayerArticulationStyle
+    ) -> SampleLibraryPlayableTarget? {
+        let playableTargets = sampleLibraryPlayableTargets(for: instrumentID)
+        guard playableTargets.isEmpty == false else { return nil }
+        return SampleLibraryArticulationMatcher.recommendedTarget(from: playableTargets, for: articulation)
     }
 
     func sampleLibraryLoadPlan(
@@ -416,11 +426,14 @@ final class StandaloneInstrumentCatalogService: ObservableObject {
         let assets = collectLibraryAssets(at: path, maxAudioFiles: 0)
 
         let presetTargets = assets.playablePresetURLs.map { presetURL in
-            SampleLibraryPlayableTarget(
+            let displayName = presetURL.deletingPathExtension().lastPathComponent
+            let detailText = "Preset · \(relativePath(for: presetURL, inside: rootURL))"
+            return SampleLibraryPlayableTarget(
                 id: "preset::\(presetURL.path)",
                 kind: .preset,
-                displayName: presetURL.deletingPathExtension().lastPathComponent,
-                detailText: "Preset · \(relativePath(for: presetURL, inside: rootURL))",
+                displayName: displayName,
+                detailText: detailText,
+                articulationFamily: SampleLibraryArticulationMatcher.classify(displayName: displayName, detailText: detailText),
                 presetURL: presetURL,
                 audioFileURLs: []
             )
@@ -457,6 +470,7 @@ final class StandaloneInstrumentCatalogService: ObservableObject {
                     kind: .audioBatch,
                     displayName: displayName,
                     detailText: detailText,
+                    articulationFamily: SampleLibraryArticulationMatcher.classify(displayName: displayName, detailText: detailText),
                     presetURL: nil,
                     audioFileURLs: clippedFiles
                 )

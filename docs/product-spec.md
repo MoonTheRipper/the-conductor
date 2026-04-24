@@ -50,6 +50,7 @@ Loop behavior:
 - allow user-added library folders for sample sources
 - load playable library folders through a sampler when audio or supported preset assets are present
 - expose per-layer preset or sample-target selection inside each assigned library folder
+- expose articulation-aware library following so orchestration style can retarget the best matching sample preset automatically
 - expose per-layer articulation, register, density, and note-length controls for orchestration shaping
 - keep the selected target visible in the main control surface
 - label non-hostable targets clearly so discovery and playback status are not conflated

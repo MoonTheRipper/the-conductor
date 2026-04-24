@@ -39,6 +39,7 @@ Native macOS presentation shell:
 - standalone Audio Unit host service for direct local playback with per-layer assignment
 - sampler-backed layer hosting for indexed library folders
 - per-layer preset and sample-target selection inside indexed library folders
+- articulation-aware target classification and recommendation inside indexed library folders
 - per-layer bus, pan, delay, and reverb routing inside the host graph
 - shared per-layer articulation and voicing controls that affect standalone playback, Logic MIDI, and export
 - per-layer MIDI channel and CC shaping that affect Logic MIDI and exported tracks

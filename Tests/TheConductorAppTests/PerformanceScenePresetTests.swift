@@ -19,6 +19,7 @@ struct PerformanceScenePresetTests {
             layerAssignedInstrumentIDs: ["Strings": "au-demo"],
             layerPerformanceSettings: ["Strings": LayerPerformanceSettings.default(for: "Strings")],
             layerMIDIRoutingSettings: ["Strings": LayerMIDIRoutingSettings.default(for: "Strings")],
+            layerLibraryFollowArticulation: ["Strings": true],
             layerLibraryTargetIDs: ["Strings": "preset::/tmp/legato.exs"],
             layerOutputSettings: ["Strings": LayerOutputSettings.default(for: "Strings")]
         )

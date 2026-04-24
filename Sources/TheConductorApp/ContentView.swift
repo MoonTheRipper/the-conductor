@@ -848,12 +848,27 @@ struct ContentView: View {
 
             let libraryTargets = viewModel.layerLibraryTargetOptions(for: layerName)
             if libraryTargets.isEmpty == false {
-                Picker("\(layerName) Library Voice", selection: viewModel.layerLibraryTargetBinding(for: layerName)) {
-                    ForEach(libraryTargets) { target in
-                        Text(target.displayName).tag(target.id)
-                    }
+                Toggle(isOn: viewModel.layerLibraryFollowBinding(for: layerName)) {
+                    Text("Follow Layer Articulation")
+                        .font(.system(size: 12, weight: .semibold, design: .rounded))
+                        .foregroundStyle(.white.opacity(0.78))
                 }
-                .pickerStyle(.menu)
+                .toggleStyle(.switch)
+
+                if viewModel.isLayerLibraryFollowingArticulation(layerName) {
+                    if let selectedTarget = viewModel.selectedLayerLibraryTarget(for: layerName) {
+                        Text("Auto target: \(selectedTarget.displayName) · \(selectedTarget.articulationFamily.displayName)")
+                            .font(.system(size: 11, weight: .medium, design: .rounded))
+                            .foregroundStyle(.mint.opacity(0.82))
+                    }
+                } else {
+                    Picker("\(layerName) Library Voice", selection: viewModel.layerLibraryTargetBinding(for: layerName)) {
+                        ForEach(libraryTargets) { target in
+                            Text("\(target.displayName) · \(target.articulationFamily.displayName)").tag(target.id)
+                        }
+                    }
+                    .pickerStyle(.menu)
+                }
 
                 if let targetSummary = viewModel.layerLibraryTargetSummary(for: layerName) {
                     Text(targetSummary)

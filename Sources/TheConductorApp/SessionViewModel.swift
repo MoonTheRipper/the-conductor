@@ -91,6 +91,7 @@ final class SessionViewModel: ObservableObject {
     @Published private(set) var layerAssignedInstrumentIDs: [String: String]
     @Published private(set) var layerPerformanceSettings: [String: LayerPerformanceSettings]
     @Published private(set) var layerMIDIRoutingSettings: [String: LayerMIDIRoutingSettings]
+    @Published private(set) var layerLibraryFollowArticulation: [String: Bool]
     @Published private(set) var layerLibraryTargetIDs: [String: String]
     @Published private(set) var layerOutputSettings: [String: LayerOutputSettings]
     @Published private(set) var liveBeatConfidence = 0.0
@@ -118,6 +119,7 @@ final class SessionViewModel: ObservableObject {
     private static let layerAssignmentsDefaultsKey = "TheConductor.layerAssignedInstrumentIDs"
     private static let layerPerformanceSettingsDefaultsKey = "TheConductor.layerPerformanceSettings"
     private static let layerMIDIRoutingSettingsDefaultsKey = "TheConductor.layerMIDIRoutingSettings"
+    private static let layerLibraryFollowArticulationDefaultsKey = "TheConductor.layerLibraryFollowArticulation"
     private static let layerLibraryTargetsDefaultsKey = "TheConductor.layerLibraryTargetIDs"
     private static let layerOutputSettingsDefaultsKey = "TheConductor.layerOutputSettings"
     private static let exportOptionsDefaultsKey = "TheConductor.exportOptions"
@@ -138,6 +140,7 @@ final class SessionViewModel: ObservableObject {
         self.layerAssignedInstrumentIDs = Self.loadLayerAssignments()
         self.layerPerformanceSettings = Self.loadLayerPerformanceSettings()
         self.layerMIDIRoutingSettings = Self.loadLayerMIDIRoutingSettings()
+        self.layerLibraryFollowArticulation = Self.loadLayerLibraryFollowArticulation()
         self.layerLibraryTargetIDs = Self.loadLayerLibraryTargets()
         self.layerOutputSettings = Self.loadLayerOutputSettings()
         self.scenePresetName = scenePresets.first?.name ?? ""
@@ -423,7 +426,21 @@ final class SessionViewModel: ObservableObject {
             get: { self.layerLibraryTargetIDs[layerName] ?? "" },
             set: { newValue in
                 self.layerLibraryTargetIDs[layerName] = newValue
+                self.layerLibraryFollowArticulation[layerName] = false
+                self.persistLayerLibraryFollowArticulation()
                 self.persistLayerLibraryTargets()
+                self.configureStandaloneSelection()
+            }
+        )
+    }
+
+    func layerLibraryFollowBinding(for layerName: String) -> Binding<Bool> {
+        Binding(
+            get: { self.layerLibraryFollowArticulation[layerName] ?? true },
+            set: { newValue in
+                self.layerLibraryFollowArticulation[layerName] = newValue
+                self.persistLayerLibraryFollowArticulation()
+                self.normalizeLayerLibraryTargets()
                 self.configureStandaloneSelection()
             }
         )
@@ -496,6 +513,10 @@ final class SessionViewModel: ObservableObject {
 
     func layerLibraryTargetSummary(for layerName: String) -> String? {
         selectedLayerLibraryTarget(for: layerName)?.detailText
+    }
+
+    func isLayerLibraryFollowingArticulation(_ layerName: String) -> Bool {
+        layerLibraryFollowArticulation[layerName] ?? true
     }
 
     func selectScenePreset(id: String) {
@@ -579,10 +600,12 @@ final class SessionViewModel: ObservableObject {
         layerAssignedInstrumentIDs = Dictionary(
             uniqueKeysWithValues: PerformanceLayerPlanner.layerNames.map { ($0, "") }
         )
+        layerLibraryFollowArticulation = Self.defaultLayerLibraryFollowArticulation
         layerLibraryTargetIDs = Dictionary(
             uniqueKeysWithValues: PerformanceLayerPlanner.layerNames.map { ($0, "") }
         )
         persistLayerAssignments()
+        persistLayerLibraryFollowArticulation()
         persistLayerLibraryTargets()
         configureStandaloneSelection()
     }
@@ -1101,7 +1124,7 @@ final class SessionViewModel: ObservableObject {
             let sampleLibraryLoadPlan = instrument.flatMap {
                 standaloneCatalogService.sampleLibraryLoadPlan(
                     for: $0.id,
-                    selectedTargetID: layerLibraryTargetIDs[layerName]
+                    selectedTargetID: effectiveLayerLibraryTargetID(for: layerName)
                 )
             }
             let supportSummary = instrumentID.isEmpty
@@ -1200,6 +1223,10 @@ final class SessionViewModel: ObservableObject {
         UserDefaults.standard.set(data, forKey: Self.layerMIDIRoutingSettingsDefaultsKey)
     }
 
+    private func persistLayerLibraryFollowArticulation() {
+        UserDefaults.standard.set(layerLibraryFollowArticulation, forKey: Self.layerLibraryFollowArticulationDefaultsKey)
+    }
+
     private func persistLayerLibraryTargets() {
         UserDefaults.standard.set(layerLibraryTargetIDs, forKey: Self.layerLibraryTargetsDefaultsKey)
     }
@@ -1266,6 +1293,13 @@ final class SessionViewModel: ObservableObject {
         return merged
     }
 
+    private static func loadLayerLibraryFollowArticulation() -> [String: Bool] {
+        var merged = defaultLayerLibraryFollowArticulation
+        let stored = UserDefaults.standard.dictionary(forKey: layerLibraryFollowArticulationDefaultsKey) as? [String: Bool] ?? [:]
+        merged.merge(stored) { _, stored in stored }
+        return merged
+    }
+
     private static func loadLayerLibraryTargets() -> [String: String] {
         var merged = Dictionary(
             uniqueKeysWithValues: PerformanceLayerPlanner.layerNames.map { ($0, "") }
@@ -1326,18 +1360,44 @@ final class SessionViewModel: ObservableObject {
     private func normalizeLayerLibraryTargets() {
         for layerName in PerformanceLayerPlanner.layerNames {
             guard let instrument = currentLayerInstrument(for: layerName), instrument.format == .sampleLibrary else {
+                layerLibraryFollowArticulation[layerName] = true
                 layerLibraryTargetIDs[layerName] = ""
                 continue
             }
 
             let targetOptions = standaloneCatalogService.sampleLibraryPlayableTargets(for: instrument.id)
-            let selectedTargetID = layerLibraryTargetIDs[layerName] ?? ""
-            if targetOptions.contains(where: { $0.id == selectedTargetID }) == false {
-                layerLibraryTargetIDs[layerName] = targetOptions.first?.id ?? ""
+            let isFollowing = layerLibraryFollowArticulation[layerName] ?? true
+            if isFollowing,
+               let articulation = layerPerformanceSettings[layerName]?.articulation,
+               let recommendedTarget = standaloneCatalogService.recommendedSampleLibraryTarget(
+                   for: instrument.id,
+                   articulation: articulation
+               ) {
+                layerLibraryTargetIDs[layerName] = recommendedTarget.id
+            } else {
+                let selectedTargetID = layerLibraryTargetIDs[layerName] ?? ""
+                if targetOptions.contains(where: { $0.id == selectedTargetID }) == false {
+                    layerLibraryTargetIDs[layerName] = targetOptions.first?.id ?? ""
+                }
             }
         }
 
+        persistLayerLibraryFollowArticulation()
         persistLayerLibraryTargets()
+    }
+
+    private func effectiveLayerLibraryTargetID(for layerName: String) -> String? {
+        let storedTargetID = layerLibraryTargetIDs[layerName]
+        guard isLayerLibraryFollowingArticulation(layerName),
+              let instrument = currentLayerInstrument(for: layerName),
+              instrument.format == .sampleLibrary
+        else {
+            return storedTargetID
+        }
+
+        let articulation = layerPerformanceSettings[layerName]?.articulation ?? LayerPerformanceSettings.default(for: layerName).articulation
+        return standaloneCatalogService.recommendedSampleLibraryTarget(for: instrument.id, articulation: articulation)?.id
+            ?? storedTargetID
     }
 
     private func syncMIDIRoutingSettings() {
@@ -1358,6 +1418,7 @@ final class SessionViewModel: ObservableObject {
             layerAssignedInstrumentIDs: layerAssignedInstrumentIDs,
             layerPerformanceSettings: layerPerformanceSettings,
             layerMIDIRoutingSettings: layerMIDIRoutingSettings,
+            layerLibraryFollowArticulation: layerLibraryFollowArticulation,
             layerLibraryTargetIDs: layerLibraryTargetIDs,
             layerOutputSettings: layerOutputSettings
         )
@@ -1384,6 +1445,7 @@ final class SessionViewModel: ObservableObject {
         )
         layerPerformanceSettings = Self.defaultLayerPerformanceSettings.merging(snapshot.layerPerformanceSettings) { _, stored in stored }
         layerMIDIRoutingSettings = Self.defaultLayerMIDIRoutingSettings.merging(snapshot.layerMIDIRoutingSettings) { _, stored in stored }
+        layerLibraryFollowArticulation = Self.defaultLayerLibraryFollowArticulation.merging(snapshot.layerLibraryFollowArticulation) { _, stored in stored }
         layerLibraryTargetIDs = Dictionary(
             uniqueKeysWithValues: PerformanceLayerPlanner.layerNames.map { layerName in
                 (layerName, snapshot.layerLibraryTargetIDs[layerName] ?? "")
@@ -1395,6 +1457,7 @@ final class SessionViewModel: ObservableObject {
         persistLayerAssignments()
         persistLayerPerformanceSettings()
         persistLayerMIDIRoutingSettings()
+        persistLayerLibraryFollowArticulation()
         persistLayerLibraryTargets()
         persistLayerOutputSettings()
         syncMIDIRoutingSettings()
@@ -1432,6 +1495,10 @@ final class SessionViewModel: ObservableObject {
         Dictionary(uniqueKeysWithValues: PerformanceLayerPlanner.layerNames.map {
             ($0, LayerMIDIRoutingSettings.default(for: $0))
         })
+    }
+
+    private static var defaultLayerLibraryFollowArticulation: [String: Bool] {
+        Dictionary(uniqueKeysWithValues: PerformanceLayerPlanner.layerNames.map { ($0, true) })
     }
 
     private func simulatedSpread(for openness: HandOpenness, pinch: Double) -> Double {

@@ -141,4 +141,42 @@ struct PerformanceLayerPlannerTests {
         #expect(richControls.expression <= 127)
         #expect(richControls.modulation <= 127)
     }
+
+    @Test
+    func articulationMatcherPrefersLegatoTargetsForLegatoStyle() {
+        let targets = [
+            SampleLibraryPlayableTarget(
+                id: "sustain",
+                kind: .preset,
+                displayName: "Warm Sustain",
+                detailText: "Preset · Strings/Warm Sustain",
+                articulationFamily: .sustain,
+                presetURL: nil,
+                audioFileURLs: []
+            ),
+            SampleLibraryPlayableTarget(
+                id: "legato",
+                kind: .preset,
+                displayName: "Expressive Legato",
+                detailText: "Preset · Strings/Expressive Legato",
+                articulationFamily: .legato,
+                presetURL: nil,
+                audioFileURLs: []
+            ),
+        ]
+
+        let selected = SampleLibraryArticulationMatcher.recommendedTarget(from: targets, for: .legato)
+
+        #expect(selected?.id == "legato")
+    }
+
+    @Test
+    func articulationMatcherClassifiesPulseKeywords() {
+        let family = SampleLibraryArticulationMatcher.classify(
+            displayName: "Low Strings Ostinato",
+            detailText: "Preset · Strings/Low Strings Ostinato"
+        )
+
+        #expect(family == .pulse)
+    }
 }

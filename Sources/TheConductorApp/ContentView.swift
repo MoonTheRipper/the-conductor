@@ -1,90 +1,18 @@
 import ConductorCore
 import SwiftUI
 
-private enum WorkspaceSection: String, CaseIterable, Identifiable {
-    case dashboard
-    case sound
-    case layers
-    case tracking
-    case library
-    case scenes
-    case loop
-
-    var id: String { rawValue }
-
-    var title: String {
-        switch self {
-        case .dashboard:
-            "Dashboard"
-        case .sound:
-            "Sound"
-        case .layers:
-            "Layers"
-        case .tracking:
-            "Tracking"
-        case .library:
-            "Library"
-        case .scenes:
-            "Scenes"
-        case .loop:
-            "Loop"
-        }
-    }
-
-    var subtitle: String {
-        switch self {
-        case .dashboard:
-            "Keep the performance state in view and reach the next action quickly."
-        case .sound:
-            "Choose the routing path and review standalone or Logic bridge status."
-        case .layers:
-            "Edit one orchestration layer at a time instead of managing all four at once."
-        case .tracking:
-            "Switch between simulator and camera tracking, then tune calibration only when needed."
-        case .library:
-            "Browse instruments and library folders with a clearer split between selection and details."
-        case .scenes:
-            "Save and recall complete session setups without hunting through the full UI."
-        case .loop:
-            "Capture, replay, and export phrases with transport and export controls grouped together."
-        }
-    }
-
-    var systemImage: String {
-        switch self {
-        case .dashboard:
-            "circle.grid.2x2"
-        case .sound:
-            "cable.connector"
-        case .layers:
-            "slider.horizontal.3"
-        case .tracking:
-            "hand.raised"
-        case .library:
-            "music.note.list"
-        case .scenes:
-            "square.stack"
-        case .loop:
-            "repeat.circle"
-        }
-    }
-}
-
 struct ContentView: View {
-    @StateObject private var viewModel = SessionViewModel()
-    @State private var selectedSection: WorkspaceSection? = .dashboard
-    @State private var selectedLayerName: String? = PerformanceLayerPlanner.layerNames.first
-    @State private var showsCalibration = false
-    @State private var showsGestureGuide = true
-    @State private var showsMIDISummary = false
-    @State private var showsSignalPaths = false
+    @ObservedObject var viewModel: SessionViewModel
+    @ObservedObject var workspace: WorkspaceState
+    @ObservedObject var preferences: AppPreferences
 
     private var activeSection: WorkspaceSection {
-        selectedSection ?? .dashboard
+        workspace.selectedSection ?? preferences.launchSection
     }
 
     private var editedLayerName: String {
-        if let selectedLayerName, PerformanceLayerPlanner.layerNames.contains(selectedLayerName) {
+        if let selectedLayerName = workspace.selectedLayerName,
+           PerformanceLayerPlanner.layerNames.contains(selectedLayerName) {
             return selectedLayerName
         }
         return PerformanceLayerPlanner.layerNames.first ?? ""
@@ -117,7 +45,12 @@ struct ContentView: View {
                     .frame(minWidth: 860, maxWidth: .infinity, maxHeight: .infinity)
 
                 inspectorColumn
-                    .frame(minWidth: 280, idealWidth: 320, maxWidth: 360, maxHeight: .infinity)
+                    .frame(
+                        minWidth: preferences.compactInspector ? 240 : 280,
+                        idealWidth: preferences.compactInspector ? 280 : 320,
+                        maxWidth: preferences.compactInspector ? 320 : 360,
+                        maxHeight: .infinity
+                    )
                     .background(Color(nsColor: .underPageBackgroundColor))
             }
             .background(Color(nsColor: .windowBackgroundColor))
@@ -142,18 +75,23 @@ struct ContentView: View {
                 }
             }
         }
-        .onAppear {
-            if selectedSection == nil {
-                selectedSection = .dashboard
-            }
-            if selectedLayerName == nil {
-                selectedLayerName = PerformanceLayerPlanner.layerNames.first
-            }
+        .onAppear { workspace.selectFirstLayerIfNeeded() }
+        .onChange(of: preferences.showCalibrationByDefault) {
+            workspace.showsCalibration = preferences.showCalibrationByDefault
+        }
+        .onChange(of: preferences.showGestureGuideByDefault) {
+            workspace.showsGestureGuide = preferences.showGestureGuideByDefault
+        }
+        .onChange(of: preferences.showMIDISummaryByDefault) {
+            workspace.showsMIDISummary = preferences.showMIDISummaryByDefault
+        }
+        .onChange(of: preferences.showSignalPathsByDefault) {
+            workspace.showsSignalPaths = preferences.showSignalPathsByDefault
         }
     }
 
     private var sidebar: some View {
-        List(selection: $selectedSection) {
+        List(selection: $workspace.selectedSection) {
             Section {
                 VStack(alignment: .leading, spacing: 6) {
                     Text("The Conductor")
@@ -429,7 +367,7 @@ struct ContentView: View {
                         }
 
                         if viewModel.standaloneLoadedLayerSummary.isEmpty == false {
-                            DisclosureGroup("Loaded Signal Paths", isExpanded: $showsSignalPaths) {
+                            DisclosureGroup("Loaded Signal Paths", isExpanded: $workspace.showsSignalPaths) {
                                 VStack(alignment: .leading, spacing: 6) {
                                     ForEach(viewModel.standaloneLoadedLayerSummary, id: \.self) { line in
                                         Text(line)
@@ -468,7 +406,7 @@ struct ContentView: View {
                             actionButton("All Notes Off", systemImage: "speaker.slash", role: .destructive, action: viewModel.silenceMIDINotes)
                         }
 
-                        DisclosureGroup("Layer Channel Summary", isExpanded: $showsMIDISummary) {
+                        DisclosureGroup("Layer Channel Summary", isExpanded: $workspace.showsMIDISummary) {
                             VStack(alignment: .leading, spacing: 6) {
                                 ForEach(viewModel.midiChannelMapDescription, id: \.self) { line in
                                     Text(line)
@@ -488,7 +426,7 @@ struct ContentView: View {
     private var layersSection: some View {
         HSplitView {
             GroupBox("Layers") {
-                List(selection: $selectedLayerName) {
+                List(selection: $workspace.selectedLayerName) {
                     ForEach(viewModel.effectiveLayers) { layer in
                         VStack(alignment: .leading, spacing: 4) {
                             Label(layer.name, systemImage: layer.isEnabled ? "speaker.wave.2" : "speaker.slash")
@@ -633,7 +571,7 @@ struct ContentView: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
             }
 
-            DisclosureGroup("Calibration", isExpanded: $showsCalibration) {
+            DisclosureGroup("Calibration", isExpanded: $workspace.showsCalibration) {
                 VStack(alignment: .leading, spacing: 12) {
                     sliderRow(title: "Center X", value: viewModel.calibrationBinding(\.centerX), range: -0.4...0.4)
                     sliderRow(title: "Center Y", value: viewModel.calibrationBinding(\.centerY), range: -0.4...0.4)
@@ -652,7 +590,7 @@ struct ContentView: View {
             }
             .conductorCardStyle()
 
-            DisclosureGroup("Gesture Vocabulary", isExpanded: $showsGestureGuide) {
+            DisclosureGroup("Gesture Vocabulary", isExpanded: $workspace.showsGestureGuide) {
                 VStack(alignment: .leading, spacing: 8) {
                     gestureGuideLine("Right-hand wrist position previews chord direction.")
                     gestureGuideLine("Right-hand pinch commits the previewed chord.")

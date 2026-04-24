@@ -32,21 +32,40 @@ final class SessionViewModel: ObservableObject {
     @Published private(set) var chordLabels: [String]
     @Published private(set) var intervalLabels: [String]
     @Published var trackingMode: TrackingMode = .simulator {
-        didSet { handleTrackingModeChange() }
+        didSet {
+            if trackingMode != oldValue {
+                debugLog("Tracking mode -> \(trackingMode.rawValue)", category: "session")
+            }
+            handleTrackingModeChange()
+        }
     }
     @Published var routingMode: RoutingMode = .standaloneHost {
-        didSet { handleRoutingModeChange() }
+        didSet {
+            if routingMode != oldValue {
+                debugLog("Routing mode -> \(routingMode.rawValue)", category: "session")
+            }
+            handleRoutingModeChange()
+        }
     }
     @Published var keyCenter: PitchClass = .c {
         didSet {
             engine.setKeyCenter(keyCenter)
             chordLabels = engine.harmonyEngine.chordLabels
             refreshCurrentInput()
+            if keyCenter != oldValue {
+                debugLog("Key center -> \(keyCenter.displayName)", category: "session")
+            }
         }
     }
     @Published var instrumentSearchText = ""
     @Published var selectedInstrumentID = "" {
-        didSet { handleSelectedInstrumentChange() }
+        didSet {
+            if selectedInstrumentID != oldValue {
+                let selectedName = availableInstruments.first(where: { $0.id == selectedInstrumentID })?.name ?? selectedInstrumentID
+                debugLog("Selected instrument -> \(selectedName.isEmpty ? "None" : selectedName)", category: "session")
+            }
+            handleSelectedInstrumentChange()
+        }
     }
     @Published var calibration: GestureCalibration {
         didSet {
@@ -58,12 +77,18 @@ final class SessionViewModel: ObservableObject {
     @Published private(set) var midiStatusText = "MIDI bridge ready"
     @Published var selectedMIDIDestinationID = LogicMIDIBridgeService.noDestinationID {
         didSet {
+            if selectedMIDIDestinationID != oldValue {
+                debugLog("MIDI destination -> \(midiDestinationName(for: selectedMIDIDestinationID))", category: "session")
+            }
             guard selectedMIDIDestinationID != midiBridgeService.selectedDestinationID else { return }
             midiBridgeService.setSelectedDestination(id: selectedMIDIDestinationID)
         }
     }
     @Published var sendToVirtualMIDISource = true {
         didSet {
+            if sendToVirtualMIDISource != oldValue {
+                debugLog("Virtual MIDI source -> \(sendToVirtualMIDISource ? "published" : "disabled")", category: "session")
+            }
             guard sendToVirtualMIDISource != midiBridgeService.sendToVirtualSource else { return }
             midiBridgeService.sendToVirtualSource = sendToVirtualMIDISource
         }
@@ -150,6 +175,16 @@ final class SessionViewModel: ObservableObject {
         bindStandaloneCatalog()
         midiBridgeService.setMIDIRoutingSettings(layerMIDIRoutingSettings)
         refreshFromDebugGesture()
+        debugLog("Session initialized with routing \(routingMode.rawValue), tracking \(trackingMode.rawValue)", category: "session")
+    }
+
+    private func debugLog(_ message: String, category: String) {
+        DebugEventFeed.shared.log(category, message)
+    }
+
+    private func midiDestinationName(for id: String) -> String {
+        guard id != LogicMIDIBridgeService.noDestinationID else { return "None" }
+        return midiDestinations.first(where: { $0.id == id })?.name ?? id
     }
 
     var selectedInstrument: InstrumentDescriptor? {
@@ -298,6 +333,7 @@ final class SessionViewModel: ObservableObject {
             set: { newValue in
                 self.layerManualEnabled[layerName] = newValue
                 self.persistLayerControls()
+                self.debugLog("Layer \(layerName) enabled -> \(newValue)", category: "layer")
             }
         )
     }
@@ -310,6 +346,8 @@ final class SessionViewModel: ObservableObject {
                 self.persistLayerAssignments()
                 self.normalizeLayerLibraryTargets()
                 self.configureStandaloneSelection()
+                let name = self.availableInstruments.first(where: { $0.id == newValue })?.name ?? "Unassigned"
+                self.debugLog("Layer \(layerName) instrument -> \(name)", category: "layer")
             }
         )
     }
@@ -323,6 +361,7 @@ final class SessionViewModel: ObservableObject {
                 self.layerOutputSettings[layerName] = settings
                 self.persistLayerOutputSettings()
                 self.configureStandaloneSelection()
+                self.debugLog("Layer \(layerName) bus -> \(newValue.rawValue)", category: "layer")
             }
         )
     }
@@ -352,6 +391,7 @@ final class SessionViewModel: ObservableObject {
                 self.layerPerformanceSettings[layerName] = settings
                 self.persistLayerPerformanceSettings()
                 self.configureStandaloneSelection()
+                self.debugLog("Layer \(layerName) articulation -> \(newValue.rawValue)", category: "layer")
             }
         )
     }
@@ -401,6 +441,7 @@ final class SessionViewModel: ObservableObject {
                 self.persistLayerMIDIRoutingSettings()
                 self.syncMIDIRoutingSettings()
                 self.configureStandaloneSelection()
+                self.debugLog("Layer \(layerName) MIDI channel -> \(newValue)", category: "layer")
             }
         )
     }
@@ -430,6 +471,8 @@ final class SessionViewModel: ObservableObject {
                 self.persistLayerLibraryFollowArticulation()
                 self.persistLayerLibraryTargets()
                 self.configureStandaloneSelection()
+                let targetName = self.selectedLayerLibraryTarget(for: layerName)?.displayName ?? newValue
+                self.debugLog("Layer \(layerName) library target -> \(targetName)", category: "layer")
             }
         )
     }
@@ -442,6 +485,7 @@ final class SessionViewModel: ObservableObject {
                 self.persistLayerLibraryFollowArticulation()
                 self.normalizeLayerLibraryTargets()
                 self.configureStandaloneSelection()
+                self.debugLog("Layer \(layerName) follow articulation -> \(newValue)", category: "layer")
             }
         )
     }
@@ -523,42 +567,53 @@ final class SessionViewModel: ObservableObject {
         selectedScenePresetID = id
         if let preset = selectedScenePreset {
             scenePresetName = preset.name
+            debugLog("Scene selected -> \(preset.name)", category: "scene")
         }
     }
 
     func startLiveTracking() {
+        debugLog("Start camera requested", category: "tracking")
         liveTrackingService.start()
     }
 
     func stopLiveTracking() {
+        debugLog("Stop camera requested", category: "tracking")
         liveTrackingService.stop()
     }
 
     func refreshMIDIDestinations() {
+        debugLog("Refresh MIDI destinations", category: "midi")
         midiBridgeService.refreshDestinations()
     }
 
     func silenceMIDINotes() {
+        debugLog("All MIDI notes off", category: "midi")
         midiBridgeService.silenceAllNotes()
     }
 
     func silenceStandaloneNotes() {
+        debugLog("Standalone panic", category: "standalone")
         standaloneHostService.silenceAllNotes()
     }
 
     func unloadStandaloneAssignments() {
+        debugLog("Unload standalone assignments", category: "standalone")
         standaloneHostService.unloadAll()
     }
 
     func refreshStandaloneInstruments() {
+        debugLog("Refresh standalone catalog", category: "library")
         standaloneCatalogService.refresh()
     }
 
     func addLibraryFolder() {
+        debugLog("Add library folder requested", category: "library")
         standaloneCatalogService.addLibraryFolder()
     }
 
     func removeLibraryFolder(id: String) {
+        let folderName = libraryFolders.first(where: { $0.id == id })?.displayName ?? id
+        debugLog("Remove library folder -> \(folderName)", category: "library")
         standaloneCatalogService.removeLibraryFolder(id: id)
     }
 
@@ -566,16 +621,19 @@ final class SessionViewModel: ObservableObject {
         isLoopPlaybackSuspended = true
         stopLoopPlayback(shouldSilence: true)
         loopTransportStatusText = isLoopAvailable ? "Loop paused" : "No loop captured"
+        debugLog("Pause loop playback", category: "loop")
     }
 
     func restartLoopPlayback() {
         guard isLoopAvailable else {
             loopTransportStatusText = "No loop captured"
+            debugLog("Restart loop requested with no loop available", category: "loop")
             return
         }
 
         isLoopPlaybackSuspended = false
         startLoopPlayback(using: performanceState.loopBuffer, force: true)
+        debugLog("Restart loop playback", category: "loop")
     }
 
     func clearLoop() {
@@ -584,6 +642,7 @@ final class SessionViewModel: ObservableObject {
         engine.clearLoopBuffer()
         performanceState = engine.state
         loopTransportStatusText = "Loop cleared"
+        debugLog("Clear loop buffer", category: "loop")
     }
 
     func assignSelectedInstrumentToAllLayers() {
@@ -594,6 +653,8 @@ final class SessionViewModel: ObservableObject {
         persistLayerAssignments()
         normalizeLayerLibraryTargets()
         configureStandaloneSelection()
+        let name = selectedInstrument?.name ?? selectedInstrumentID
+        debugLog("Assign selected instrument to all layers -> \(name)", category: "layer")
     }
 
     func clearLayerAssignments() {
@@ -608,18 +669,21 @@ final class SessionViewModel: ObservableObject {
         persistLayerLibraryFollowArticulation()
         persistLayerLibraryTargets()
         configureStandaloneSelection()
+        debugLog("Clear all layer assignments", category: "layer")
     }
 
     func resetLayerOutputRouting() {
         layerOutputSettings = Self.defaultLayerOutputSettings
         persistLayerOutputSettings()
         configureStandaloneSelection()
+        debugLog("Reset layer output routing", category: "layer")
     }
 
     func resetLayerPerformanceSettings() {
         layerPerformanceSettings = Self.defaultLayerPerformanceSettings
         persistLayerPerformanceSettings()
         configureStandaloneSelection()
+        debugLog("Reset layer performance settings", category: "layer")
     }
 
     func resetLayerMIDIRoutingSettings() {
@@ -627,10 +691,12 @@ final class SessionViewModel: ObservableObject {
         persistLayerMIDIRoutingSettings()
         syncMIDIRoutingSettings()
         configureStandaloneSelection()
+        debugLog("Reset layer MIDI routing", category: "layer")
     }
 
     func resetCalibration() {
         calibration = GestureCalibration()
+        debugLog("Reset gesture calibration", category: "tracking")
     }
 
     func exportLoopAsMIDI() {
@@ -643,10 +709,13 @@ final class SessionViewModel: ObservableObject {
                 midiRoutingSettingsByLayer: layerMIDIRoutingSettings
             )
             exportStatusText = "Exported layer-aware MIDI to \(url.lastPathComponent)"
+            debugLog("Export MIDI -> \(url.lastPathComponent)", category: "export")
         } catch ExportError.cancelled {
             exportStatusText = "MIDI export cancelled"
+            debugLog("Export MIDI cancelled", category: "export")
         } catch {
             exportStatusText = error.localizedDescription
+            debugLog("Export MIDI failed -> \(error.localizedDescription)", category: "export")
         }
     }
 
@@ -662,6 +731,7 @@ final class SessionViewModel: ObservableObject {
         selectedScenePresetID = preset.id.uuidString
         scenePresetName = preset.name
         persistScenePresets()
+        debugLog("Save new scene -> \(preset.name)", category: "scene")
     }
 
     func updateSelectedScenePreset() {
@@ -676,15 +746,18 @@ final class SessionViewModel: ObservableObject {
         scenePresets[selectedIndex].snapshot = capturedSceneSnapshot()
         scenePresetName = scenePresets[selectedIndex].name
         persistScenePresets()
+        debugLog("Update scene -> \(scenePresets[selectedIndex].name)", category: "scene")
     }
 
     func loadSelectedScenePreset() {
         guard let preset = selectedScenePreset else { return }
         applyScenePreset(preset)
+        debugLog("Load scene -> \(preset.name)", category: "scene")
     }
 
     func deleteSelectedScenePreset() {
         guard let selectedPreset = selectedScenePreset else { return }
+        debugLog("Delete scene -> \(selectedPreset.name)", category: "scene")
         scenePresets.removeAll { $0.id == selectedPreset.id }
         if let nextPreset = scenePresets.first {
             selectedScenePresetID = nextPreset.id.uuidString
@@ -697,6 +770,7 @@ final class SessionViewModel: ObservableObject {
     }
 
     func pulseCommit() {
+        debugLog("Simulator pulse -> commit", category: "tracking")
         pulse(
             engage: {
                 $0.rightPinch = 0.95
@@ -707,6 +781,7 @@ final class SessionViewModel: ObservableObject {
     }
 
     func pulseLoopToggle() {
+        debugLog("Simulator pulse -> loop toggle", category: "tracking")
         pulse(
             engage: {
                 $0.leftPinch = 0.95
@@ -720,6 +795,7 @@ final class SessionViewModel: ObservableObject {
     }
 
     func pulseDownbeat() {
+        debugLog("Simulator pulse -> downbeat", category: "tracking")
         pulse(
             engage: {
                 $0.rightOpenness = .open
@@ -730,6 +806,7 @@ final class SessionViewModel: ObservableObject {
     }
 
     func pulseStop() {
+        debugLog("Simulator pulse -> stop", category: "tracking")
         pulse(
             engage: {
                 $0.rightOpenness = .closed
@@ -773,6 +850,7 @@ final class SessionViewModel: ObservableObject {
             .receive(on: DispatchQueue.main)
             .sink { [weak self] destinations in
                 self?.midiDestinations = destinations
+                self?.debugLog("Available MIDI destinations -> \(destinations.count)", category: "midi")
             }
             .store(in: &cancellables)
 
@@ -810,6 +888,7 @@ final class SessionViewModel: ObservableObject {
                 self.normalizeLayerAssignments()
                 self.normalizeLayerLibraryTargets()
                 self.configureStandaloneSelection()
+                self.debugLog("Catalog instruments -> \(instruments.count)", category: "library")
             }
             .store(in: &cancellables)
 
@@ -817,6 +896,7 @@ final class SessionViewModel: ObservableObject {
             .receive(on: DispatchQueue.main)
             .sink { [weak self] libraryFolders in
                 self?.libraryFolders = libraryFolders
+                self?.debugLog("Library folders -> \(libraryFolders.count)", category: "library")
             }
             .store(in: &cancellables)
 
@@ -971,16 +1051,32 @@ final class SessionViewModel: ObservableObject {
         for event in events {
             switch event {
             case .chordCommitted(let chord, let interval, let dynamics, _):
+                debugLog(
+                    "Committed \(chord.symbol) with \(interval.spokenName.lowercased()) focus at \(Int(dynamics * 100))% -> \(routingMode.rawValue)",
+                    category: "engine"
+                )
                 playToActiveRoute(
                     chord: chord,
                     interval: interval,
                     dynamics: dynamics
                 )
             case .transportChanged(let isPerforming, _):
+                debugLog("Transport -> \(isPerforming ? "engaged" : "muted")", category: "engine")
                 if isPerforming == false {
                     stopLoopPlayback(shouldSilence: true)
                 }
             case .loopStateChanged(let loopBuffer, _):
+                let summary: String
+                if loopBuffer.isRecording {
+                    summary = "recording started"
+                } else if loopBuffer.isPlaying {
+                    summary = "playback started with \(loopBuffer.phrase.count) events"
+                } else if loopBuffer.phrase.isEmpty {
+                    summary = "cleared"
+                } else {
+                    summary = "recording stopped with \(loopBuffer.phrase.count) events"
+                }
+                debugLog("Loop -> \(summary)", category: "engine")
                 updateLoopTransportStatus(using: loopBuffer)
                 if loopBuffer.isPlaying {
                     isLoopPlaybackSuspended = false
@@ -1010,6 +1106,7 @@ final class SessionViewModel: ObservableObject {
             cycleDuration: duration
         )
         loopTransportStatusText = "Looping \(loopBuffer.phrase.count) events over \(String(format: "%.2f", duration))s"
+        debugLog("Loop scheduler -> \(loopBuffer.phrase.count) events over \(String(format: "%.2f", duration))s", category: "loop")
     }
 
     private func scheduleLoopCycle(
@@ -1054,6 +1151,7 @@ final class SessionViewModel: ObservableObject {
     }
 
     private func playLoopPhraseEvent(_ phraseEvent: LoopPhraseEvent) {
+        debugLog("Loop phrase -> \(phraseEvent.chord.symbol), \(phraseEvent.interval.spokenName), \(Int(phraseEvent.dynamics * 100))%", category: "loop")
         playToActiveRoute(
             chord: phraseEvent.chord,
             interval: phraseEvent.interval,
@@ -1072,6 +1170,7 @@ final class SessionViewModel: ObservableObject {
             midiBridgeService.silenceAllNotes()
             standaloneHostService.silenceAllNotes()
         }
+        debugLog("Loop playback stopped\(shouldSilence ? " with silence" : "")", category: "loop")
     }
 
     private func playToActiveRoute(
@@ -1107,6 +1206,7 @@ final class SessionViewModel: ObservableObject {
                 layerAssignedInstrumentIDs[layerName] = selectedInstrumentID
             }
             persistLayerAssignments()
+            debugLog("Auto-assigned selected instrument across empty layers", category: "layer")
         }
         normalizeLayerLibraryTargets()
         configureStandaloneSelection()

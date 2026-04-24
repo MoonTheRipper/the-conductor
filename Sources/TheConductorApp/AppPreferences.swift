@@ -11,27 +11,51 @@ final class AppPreferences: ObservableObject {
     }
 
     @Published var launchSection: WorkspaceSection {
-        didSet { defaults.set(launchSection.rawValue, forKey: Keys.launchSection.rawValue) }
+        didSet {
+            defaults.set(launchSection.rawValue, forKey: Keys.launchSection.rawValue)
+            guard launchSection != oldValue else { return }
+            DebugEventFeed.shared.log("preferences", "Launch section -> \(launchSection.title)")
+        }
     }
 
     @Published var showGestureGuideByDefault: Bool {
-        didSet { defaults.set(showGestureGuideByDefault, forKey: Keys.showGestureGuideByDefault.rawValue) }
+        didSet {
+            defaults.set(showGestureGuideByDefault, forKey: Keys.showGestureGuideByDefault.rawValue)
+            guard showGestureGuideByDefault != oldValue else { return }
+            DebugEventFeed.shared.log("preferences", "Gesture guide default -> \(showGestureGuideByDefault)")
+        }
     }
 
     @Published var showCalibrationByDefault: Bool {
-        didSet { defaults.set(showCalibrationByDefault, forKey: Keys.showCalibrationByDefault.rawValue) }
+        didSet {
+            defaults.set(showCalibrationByDefault, forKey: Keys.showCalibrationByDefault.rawValue)
+            guard showCalibrationByDefault != oldValue else { return }
+            DebugEventFeed.shared.log("preferences", "Calibration default -> \(showCalibrationByDefault)")
+        }
     }
 
     @Published var showMIDISummaryByDefault: Bool {
-        didSet { defaults.set(showMIDISummaryByDefault, forKey: Keys.showMIDISummaryByDefault.rawValue) }
+        didSet {
+            defaults.set(showMIDISummaryByDefault, forKey: Keys.showMIDISummaryByDefault.rawValue)
+            guard showMIDISummaryByDefault != oldValue else { return }
+            DebugEventFeed.shared.log("preferences", "MIDI summary default -> \(showMIDISummaryByDefault)")
+        }
     }
 
     @Published var showSignalPathsByDefault: Bool {
-        didSet { defaults.set(showSignalPathsByDefault, forKey: Keys.showSignalPathsByDefault.rawValue) }
+        didSet {
+            defaults.set(showSignalPathsByDefault, forKey: Keys.showSignalPathsByDefault.rawValue)
+            guard showSignalPathsByDefault != oldValue else { return }
+            DebugEventFeed.shared.log("preferences", "Signal paths default -> \(showSignalPathsByDefault)")
+        }
     }
 
     @Published var compactInspector: Bool {
-        didSet { defaults.set(compactInspector, forKey: Keys.compactInspector.rawValue) }
+        didSet {
+            defaults.set(compactInspector, forKey: Keys.compactInspector.rawValue)
+            guard compactInspector != oldValue else { return }
+            DebugEventFeed.shared.log("preferences", "Compact inspector -> \(compactInspector)")
+        }
     }
 
     private let defaults: UserDefaults
@@ -44,5 +68,6 @@ final class AppPreferences: ObservableObject {
         self.showMIDISummaryByDefault = defaults.object(forKey: Keys.showMIDISummaryByDefault.rawValue) as? Bool ?? false
         self.showSignalPathsByDefault = defaults.object(forKey: Keys.showSignalPathsByDefault.rawValue) as? Bool ?? false
         self.compactInspector = defaults.object(forKey: Keys.compactInspector.rawValue) as? Bool ?? false
+        DebugEventFeed.shared.log("preferences", "Loaded app preferences")
     }
 }

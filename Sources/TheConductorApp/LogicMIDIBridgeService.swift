@@ -26,6 +26,7 @@ final class LogicMIDIBridgeService: ObservableObject {
     private var virtualSource = MIDIEndpointRef()
     private var endpointByID: [String: MIDIEndpointRef] = [:]
     private var noteGeneration = 0
+    private var midiRoutingSettingsByLayer: [String: LayerMIDIRoutingSettings] = [:]
 
     init() {
         setupMIDI()
@@ -42,10 +43,6 @@ final class LogicMIDIBridgeService: ObservableObject {
         if client != 0 {
             MIDIClientDispose(client)
         }
-    }
-
-    var channelMapDescription: [String] {
-        PerformanceLayerPlanner.channelMapDescription
     }
 
     func refreshDestinations() {
@@ -90,6 +87,10 @@ final class LogicMIDIBridgeService: ObservableObject {
         updateStatusText()
     }
 
+    func setMIDIRoutingSettings(_ settings: [String: LayerMIDIRoutingSettings]) {
+        midiRoutingSettingsByLayer = settings
+    }
+
     func silenceAllNotes() {
         noteGeneration += 1
         emitAllNotesOff()
@@ -101,19 +102,23 @@ final class LogicMIDIBridgeService: ObservableObject {
         interval: IntervalChoice,
         dynamics: Double,
         layers: [LayerState],
-        performanceSettingsByLayer: [String: LayerPerformanceSettings]
+        performanceSettingsByLayer: [String: LayerPerformanceSettings],
+        midiRoutingSettingsByLayer: [String: LayerMIDIRoutingSettings]
     ) {
         guard hasOutputTarget else {
             statusText = "No MIDI target selected"
             return
         }
 
+        self.midiRoutingSettingsByLayer = midiRoutingSettingsByLayer
+
         let payloads = PerformanceLayerPlanner.payloads(
             chord: chord,
             interval: interval,
             dynamics: dynamics,
             layers: layers,
-            performanceSettingsByLayer: performanceSettingsByLayer
+            performanceSettingsByLayer: performanceSettingsByLayer,
+            midiRoutingSettingsByLayer: midiRoutingSettingsByLayer
         )
 
         guard payloads.isEmpty == false else {
@@ -127,6 +132,19 @@ final class LogicMIDIBridgeService: ObservableObject {
         emitAllNotesOff()
 
         for payload in payloads {
+            if let layer = layers.first(where: { $0.name == payload.name }) {
+                let performanceSettings = performanceSettingsByLayer[payload.name] ?? .default(for: payload.name)
+                let midiRoutingSettings = midiRoutingSettingsByLayer[payload.name] ?? .default(for: payload.name)
+                let controlValues = LayerMIDIControlPlanner.controlValues(
+                    layer: layer,
+                    dynamics: dynamics,
+                    performanceSettings: performanceSettings,
+                    midiRoutingSettings: midiRoutingSettings
+                )
+                dispatch(bytes: [UInt8(0xB0 | payload.channel), 1, controlValues.modulation])
+                dispatch(bytes: [UInt8(0xB0 | payload.channel), 11, controlValues.expression])
+            }
+
             let bytes = payload.notes.flatMap { note in
                 [UInt8(0x90 | payload.channel), note, payload.velocity]
             }
@@ -179,9 +197,13 @@ final class LogicMIDIBridgeService: ObservableObject {
     }
 
     private func emitAllNotesOff() {
-        for layer in PerformanceLayerPlanner.layerChannels {
-            dispatch(bytes: [UInt8(0xB0 | layer.channel), 123, 0])
-            dispatch(bytes: [UInt8(0xB0 | layer.channel), 120, 0])
+        for layerName in PerformanceLayerPlanner.layerNames {
+            let channel = PerformanceLayerPlanner.channel(
+                for: layerName,
+                midiRoutingSettingsByLayer: midiRoutingSettingsByLayer
+            ) ?? 0
+            dispatch(bytes: [UInt8(0xB0 | channel), 123, 0])
+            dispatch(bytes: [UInt8(0xB0 | channel), 120, 0])
         }
     }
 

@@ -10,23 +10,39 @@ struct PlaybackLayerPayload {
 }
 
 enum PerformanceLayerPlanner {
-    static let layerChannels: [(name: String, channel: UInt8)] = [
+    static let defaultLayerChannels: [(name: String, channel: UInt8)] = [
         ("Strings", 0),
         ("Brass", 1),
         ("Woods", 2),
         ("Pulse", 3),
     ]
 
+    static var layerChannels: [(name: String, channel: UInt8)] {
+        defaultLayerChannels
+    }
+
     static var layerNames: [String] {
-        layerChannels.map(\.name)
+        defaultLayerChannels.map(\.name)
     }
 
-    static var channelMapDescription: [String] {
-        layerChannels.map { "\($0.name) -> MIDI ch \($0.channel + 1)" }
+    static func channelMapDescription(
+        using midiRoutingSettingsByLayer: [String: LayerMIDIRoutingSettings] = [:]
+    ) -> [String] {
+        layerNames.map { layerName in
+            let channel = channel(for: layerName, midiRoutingSettingsByLayer: midiRoutingSettingsByLayer) ?? 0
+            let midiSettings = midiRoutingSettingsByLayer[layerName] ?? .default(for: layerName)
+            return "\(layerName) -> MIDI ch \(channel + 1) · expr \(Int(midiSettings.expressionDepth * 100))% · mod \(Int(midiSettings.modulationDepth * 100))%"
+        }
     }
 
-    static func channel(for layerName: String) -> UInt8? {
-        layerChannels.first(where: { $0.name == layerName })?.channel
+    static func channel(
+        for layerName: String,
+        midiRoutingSettingsByLayer: [String: LayerMIDIRoutingSettings] = [:]
+    ) -> UInt8? {
+        if let routingSettings = midiRoutingSettingsByLayer[layerName] {
+            return routingSettings.clampedChannel
+        }
+        return defaultLayerChannels.first(where: { $0.name == layerName })?.channel
     }
 
     static func payloads(
@@ -34,19 +50,20 @@ enum PerformanceLayerPlanner {
         interval: IntervalChoice,
         dynamics: Double,
         layers: [LayerState],
-        performanceSettingsByLayer: [String: LayerPerformanceSettings] = [:]
+        performanceSettingsByLayer: [String: LayerPerformanceSettings] = [:],
+        midiRoutingSettingsByLayer: [String: LayerMIDIRoutingSettings] = [:]
     ) -> [PlaybackLayerPayload] {
-        layerChannels.compactMap { mapping in
-            guard let layer = layers.first(where: { $0.name == mapping.name }) else {
+        layerNames.compactMap { layerName in
+            guard let layer = layers.first(where: { $0.name == layerName }) else {
                 return nil
             }
             guard layer.isEnabled, layer.mix > 0.12 else {
                 return nil
             }
 
-            let performanceSettings = performanceSettingsByLayer[mapping.name] ?? .default(for: mapping.name)
+            let performanceSettings = performanceSettingsByLayer[layerName] ?? .default(for: layerName)
             let notes = voicing(
-                for: mapping.name,
+                for: layerName,
                 chord: chord,
                 interval: interval,
                 dynamics: dynamics,
@@ -75,8 +92,8 @@ enum PerformanceLayerPlanner {
             )
 
             return PlaybackLayerPayload(
-                name: mapping.name,
-                channel: mapping.channel,
+                name: layerName,
+                channel: channel(for: layerName, midiRoutingSettingsByLayer: midiRoutingSettingsByLayer) ?? 0,
                 notes: notes,
                 velocity: velocity,
                 holdDuration: holdDuration

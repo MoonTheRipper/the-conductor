@@ -39,6 +39,7 @@ The current app is a working local MVP for the product direction we agreed on. I
 - richer live hand interpretation from spread, roll, and horizontal motion
 - smoothed live downbeat-intent diagnostics for camera-driven transport engagement
 - saved scene presets for full orchestra, routing, calibration, and export-state recall
+- per-layer MIDI channel, expression, and mod-wheel shaping for Logic and exported MIDI
 - searchable instrument catalog and indexed library-folder summaries
 
 ## Current Product Modes
@@ -50,7 +51,8 @@ The current Logic Bridge implementation exposes:
 
 - a virtual MIDI source named `The Conductor`
 - direct destination selection for endpoints such as `Logic Pro Virtual In`
-- layer-to-channel mapping for `Strings`, `Brass`, `Woods`, and `Pulse`
+- per-layer MIDI channel mapping for `Strings`, `Brass`, `Woods`, and `Pulse`
+- per-layer CC11 expression and CC1 mod-wheel shaping before note output
 - loop playback routing back into MIDI when a progression is closed
 
 The current standalone catalog implementation exposes:
@@ -71,7 +73,7 @@ The current loop and control implementation exposes:
 
 - loop capture with recorded event timestamps, interval focus, and dynamics
 - restart, pause, and clear transport controls in the app UI
-- multi-track standard MIDI file export with one musical track per layer, plus export tempo and repeat metadata controls
+- multi-track standard MIDI file export with one musical track per layer, plus export tempo, repeat metadata, and per-layer CC automation
 - persistent calibration and layer-trim settings through `UserDefaults`
 - persistent scene presets through `UserDefaults`
 

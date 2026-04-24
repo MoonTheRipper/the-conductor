@@ -10,6 +10,7 @@ struct LayerHostedInstrumentSelection {
     let audioUnitDescription: AudioComponentDescription?
     let sampleLibraryLoadPlan: SampleLibraryLoadPlan?
     let performanceSettings: LayerPerformanceSettings
+    let midiRoutingSettings: LayerMIDIRoutingSettings
     let outputSettings: LayerOutputSettings
     let capabilitySummary: String
 }
@@ -40,6 +41,7 @@ private final class HostedLayerSlot {
     let delay: AVAudioUnitDelay
     let reverb: AVAudioUnitReverb
     var performanceSettings: LayerPerformanceSettings
+    var midiChannel: UInt8
     var outputSettings: LayerOutputSettings
 
     init(
@@ -54,6 +56,7 @@ private final class HostedLayerSlot {
         delay: AVAudioUnitDelay,
         reverb: AVAudioUnitReverb,
         performanceSettings: LayerPerformanceSettings,
+        midiChannel: UInt8,
         outputSettings: LayerOutputSettings
     ) {
         self.layerName = layerName
@@ -67,6 +70,7 @@ private final class HostedLayerSlot {
         self.delay = delay
         self.reverb = reverb
         self.performanceSettings = performanceSettings
+        self.midiChannel = midiChannel
         self.outputSettings = outputSettings
     }
 
@@ -118,6 +122,7 @@ final class StandaloneAudioHostService: ObservableObject {
                existingSlot.selectionSignature == selection.selectionSignature,
                matchesHostedKind(of: existingSlot, for: instrument) {
                 existingSlot.performanceSettings = selection.performanceSettings
+                existingSlot.midiChannel = selection.midiRoutingSettings.clampedChannel
                 applyOutputSettings(selection.outputSettings, to: existingSlot)
                 readyLayers.append(selection.layerName)
                 continue
@@ -138,6 +143,7 @@ final class StandaloneAudioHostService: ObservableObject {
                     instrumentName: instrument.name,
                     description: description,
                     performanceSettings: selection.performanceSettings,
+                    midiRoutingSettings: selection.midiRoutingSettings,
                     outputSettings: selection.outputSettings
                 )
                 readyLayers.append(selection.layerName)
@@ -156,6 +162,7 @@ final class StandaloneAudioHostService: ObservableObject {
                     instrumentName: sampleLibraryLoadPlan.displayName,
                     loadPlan: sampleLibraryLoadPlan,
                     performanceSettings: selection.performanceSettings,
+                    midiRoutingSettings: selection.midiRoutingSettings,
                     outputSettings: selection.outputSettings
                 )
                 readyLayers.append(selection.layerName)
@@ -185,7 +192,8 @@ final class StandaloneAudioHostService: ObservableObject {
         interval: IntervalChoice,
         dynamics: Double,
         layers: [LayerState],
-        performanceSettingsByLayer: [String: LayerPerformanceSettings]
+        performanceSettingsByLayer: [String: LayerPerformanceSettings],
+        midiRoutingSettingsByLayer: [String: LayerMIDIRoutingSettings]
     ) {
         guard layerSlotsByName.isEmpty == false else {
             statusText = "No standalone targets loaded for playback"
@@ -199,7 +207,8 @@ final class StandaloneAudioHostService: ObservableObject {
             interval: interval,
             dynamics: dynamics,
             layers: layers,
-            performanceSettingsByLayer: performanceSettingsByLayer
+            performanceSettingsByLayer: performanceSettingsByLayer,
+            midiRoutingSettingsByLayer: midiRoutingSettingsByLayer
         )
 
         guard payloads.isEmpty == false else {
@@ -304,6 +313,7 @@ final class StandaloneAudioHostService: ObservableObject {
         instrumentName: String,
         description: AudioComponentDescription,
         performanceSettings: LayerPerformanceSettings,
+        midiRoutingSettings: LayerMIDIRoutingSettings,
         outputSettings: LayerOutputSettings
     ) {
         unloadSlot(for: layerName)
@@ -333,6 +343,7 @@ final class StandaloneAudioHostService: ObservableObject {
             delay: delay,
             reverb: reverb,
             performanceSettings: performanceSettings,
+            midiChannel: midiRoutingSettings.clampedChannel,
             outputSettings: outputSettings
         )
 
@@ -348,6 +359,7 @@ final class StandaloneAudioHostService: ObservableObject {
         instrumentName: String,
         loadPlan: SampleLibraryLoadPlan,
         performanceSettings: LayerPerformanceSettings,
+        midiRoutingSettings: LayerMIDIRoutingSettings,
         outputSettings: LayerOutputSettings
     ) {
         unloadSlot(for: layerName)
@@ -382,6 +394,7 @@ final class StandaloneAudioHostService: ObservableObject {
                 delay: delay,
                 reverb: reverb,
                 performanceSettings: performanceSettings,
+                midiChannel: midiRoutingSettings.clampedChannel,
                 outputSettings: outputSettings
             )
 
@@ -488,7 +501,7 @@ final class StandaloneAudioHostService: ObservableObject {
     private func silenceNotes(for layerName: String) {
         guard let slot = layerSlotsByName[layerName] else { return }
 
-        let channel = PerformanceLayerPlanner.channel(for: layerName) ?? 0
+        let channel = slot.midiChannel
         for note in activeNotesByLayer[layerName, default: []] {
             slot.midiInstrument.stopNote(note, onChannel: channel)
         }

@@ -55,6 +55,7 @@ Loop behavior:
 - label non-hostable targets clearly so discovery and playback status are not conflated
 - expose searchable catalog browsing so large plugin installs stay manageable
 - expose per-layer output bus and effect controls inside the same performance surface
+- expose per-layer MIDI channel and expression controls for Logic-facing orchestral templates
 - allow export-time clip naming, tempo choice, and repeat count without leaving the surface
 
 ## Visual Language

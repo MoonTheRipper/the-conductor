@@ -199,6 +199,7 @@ struct ContentView: View {
                 Text("Logic Bridge")
                     .sectionTitle()
                 Spacer()
+                actionButton("Reset MIDI", color: .purple, action: viewModel.resetLayerMIDIRoutingSettings)
                 actionButton("Refresh MIDI", color: .cyan, action: viewModel.refreshMIDIDestinations)
             }
 
@@ -241,6 +242,10 @@ struct ContentView: View {
                         .font(.system(size: 12, weight: .medium, design: .rounded))
                         .foregroundStyle(.white.opacity(0.72))
                 }
+            }
+
+            ForEach(PerformanceLayerPlanner.layerNames, id: \.self) { layerName in
+                midiRoutingRow(layerName: layerName)
             }
 
             actionButton("All Notes Off", color: .red, action: viewModel.silenceMIDINotes)
@@ -901,6 +906,44 @@ struct ContentView: View {
             )
         }
         .buttonStyle(.plain)
+    }
+
+    private func midiRoutingRow(layerName: String) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                Text(layerName)
+                    .font(.system(size: 13, weight: .bold, design: .rounded))
+                    .foregroundStyle(.white)
+                Spacer()
+                Text(viewModel.layerMIDIRoutingSummary(for: layerName))
+                    .font(.system(size: 11, weight: .medium, design: .rounded))
+                    .foregroundStyle(.white.opacity(0.58))
+            }
+
+            compactStepperRow(
+                title: "MIDI Channel",
+                value: viewModel.layerMIDIIntBinding(for: layerName, keyPath: \.channelNumber),
+                range: 1...16,
+                valueText: { value in "Ch \(value)" }
+            )
+
+            sliderRow(
+                title: "Expression CC11",
+                value: viewModel.layerMIDIDoubleBinding(for: layerName, keyPath: \.expressionDepth),
+                range: 0...1
+            )
+
+            sliderRow(
+                title: "Mod Wheel CC1",
+                value: viewModel.layerMIDIDoubleBinding(for: layerName, keyPath: \.modulationDepth),
+                range: 0...1
+            )
+        }
+        .padding(12)
+        .background(
+            RoundedRectangle(cornerRadius: 18, style: .continuous)
+                .fill(Color.black.opacity(0.14))
+        )
     }
 
     private func actionButton(_ title: String, color: Color, action: @escaping () -> Void) -> some View {

@@ -99,4 +99,46 @@ struct PerformanceLayerPlannerTests {
         #expect((accentPayload?.velocity ?? 0) > (sustainPayload?.velocity ?? 0))
         #expect((pulsePayload?.holdDuration ?? 0) < (sustainPayload?.holdDuration ?? 0))
     }
+
+    @Test
+    func midiRoutingOverridesPayloadChannel() {
+        let payload = PerformanceLayerPlanner.payloads(
+            chord: ChordSelection(root: .g, quality: .major9, function: .tonic),
+            interval: .fifth,
+            dynamics: 0.6,
+            layers: [
+                LayerState(name: "Woods", mix: 0.8, isEnabled: true),
+            ],
+            midiRoutingSettingsByLayer: [
+                "Woods": LayerMIDIRoutingSettings(channelNumber: 12, expressionDepth: 0.7, modulationDepth: 0.45),
+            ]
+        ).first
+
+        #expect(payload?.name == "Woods")
+        #expect(payload?.channel == 11)
+    }
+
+    @Test
+    func midiControlPlannerRespondsToDepthSettings() {
+        let layer = LayerState(name: "Strings", mix: 0.9, isEnabled: true)
+        let performanceSettings = LayerPerformanceSettings.default(for: "Strings")
+
+        let quietControls = LayerMIDIControlPlanner.controlValues(
+            layer: layer,
+            dynamics: 0.75,
+            performanceSettings: performanceSettings,
+            midiRoutingSettings: LayerMIDIRoutingSettings(channelNumber: 1, expressionDepth: 0.2, modulationDepth: 0.1)
+        )
+        let richControls = LayerMIDIControlPlanner.controlValues(
+            layer: layer,
+            dynamics: 0.75,
+            performanceSettings: performanceSettings,
+            midiRoutingSettings: LayerMIDIRoutingSettings(channelNumber: 1, expressionDepth: 0.9, modulationDepth: 0.8)
+        )
+
+        #expect(richControls.expression > quietControls.expression)
+        #expect(richControls.modulation > quietControls.modulation)
+        #expect(richControls.expression <= 127)
+        #expect(richControls.modulation <= 127)
+    }
 }

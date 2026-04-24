@@ -11,7 +11,8 @@ final class MIDILoopExportService {
         loopBuffer: LoopBuffer,
         layers: [LayerState],
         options: MIDIExportOptions,
-        performanceSettingsByLayer: [String: LayerPerformanceSettings]
+        performanceSettingsByLayer: [String: LayerPerformanceSettings],
+        midiRoutingSettingsByLayer: [String: LayerMIDIRoutingSettings]
     ) throws -> URL {
         guard loopBuffer.phrase.isEmpty == false else {
             throw ExportError.noLoop
@@ -33,7 +34,8 @@ final class MIDILoopExportService {
             loopBuffer: loopBuffer,
             layers: layers,
             options: options,
-            performanceSettingsByLayer: performanceSettingsByLayer
+            performanceSettingsByLayer: performanceSettingsByLayer,
+            midiRoutingSettingsByLayer: midiRoutingSettingsByLayer
         )
         try data.write(to: url, options: .atomic)
         return url
@@ -43,13 +45,15 @@ final class MIDILoopExportService {
         loopBuffer: LoopBuffer,
         layers: [LayerState],
         options: MIDIExportOptions,
-        performanceSettingsByLayer: [String: LayerPerformanceSettings]
+        performanceSettingsByLayer: [String: LayerPerformanceSettings],
+        midiRoutingSettingsByLayer: [String: LayerMIDIRoutingSettings]
     ) -> Data {
         let tracks = buildTracks(
             loopBuffer: loopBuffer,
             layers: layers,
             options: options,
-            performanceSettingsByLayer: performanceSettingsByLayer
+            performanceSettingsByLayer: performanceSettingsByLayer,
+            midiRoutingSettingsByLayer: midiRoutingSettingsByLayer
         )
 
         var file = Data()
@@ -71,7 +75,8 @@ final class MIDILoopExportService {
         loopBuffer: LoopBuffer,
         layers: [LayerState],
         options: MIDIExportOptions,
-        performanceSettingsByLayer: [String: LayerPerformanceSettings]
+        performanceSettingsByLayer: [String: LayerPerformanceSettings],
+        midiRoutingSettingsByLayer: [String: LayerMIDIRoutingSettings]
     ) -> [Data] {
         var tracks: [Data] = [buildTempoTrack(loopBuffer: loopBuffer, options: options)]
 
@@ -81,7 +86,8 @@ final class MIDILoopExportService {
                 layers: layers,
                 layerName: layerName,
                 options: options,
-                performanceSettingsByLayer: performanceSettingsByLayer
+                performanceSettingsByLayer: performanceSettingsByLayer,
+                midiRoutingSettingsByLayer: midiRoutingSettingsByLayer
             )
             if track.isEmpty == false {
                 tracks.append(track)
@@ -128,7 +134,8 @@ final class MIDILoopExportService {
         layers: [LayerState],
         layerName: String,
         options: MIDIExportOptions,
-        performanceSettingsByLayer: [String: LayerPerformanceSettings]
+        performanceSettingsByLayer: [String: LayerPerformanceSettings],
+        midiRoutingSettingsByLayer: [String: LayerMIDIRoutingSettings]
     ) -> Data {
         let ticksPerSecond = Double(pulsesPerQuarterNote) * 2.0
         let loopStart = loopBuffer.startTimestamp ?? loopBuffer.phrase.first?.timestamp ?? 0.0
@@ -138,7 +145,10 @@ final class MIDILoopExportService {
         )
         let loopDuration = singleLoopDuration * Double(max(options.repeatCount, 1))
 
-        guard let channel = PerformanceLayerPlanner.channel(for: layerName) else {
+        guard let channel = PerformanceLayerPlanner.channel(
+            for: layerName,
+            midiRoutingSettingsByLayer: midiRoutingSettingsByLayer
+        ) else {
             return Data()
         }
 
@@ -155,7 +165,8 @@ final class MIDILoopExportService {
                     interval: phraseEvent.interval,
                     dynamics: phraseEvent.dynamics,
                     layers: layers,
-                    performanceSettingsByLayer: performanceSettingsByLayer
+                    performanceSettingsByLayer: performanceSettingsByLayer,
+                    midiRoutingSettingsByLayer: midiRoutingSettingsByLayer
                 ).first(where: { $0.name == layerName })
 
                 guard let payload else { continue }
@@ -164,6 +175,31 @@ final class MIDILoopExportService {
                 let noteOffTick = Int(
                     min(loopDuration, max(0.1, phraseEvent.timestamp - loopStart + cycleOffset + payload.holdDuration)) * ticksPerSecond
                 )
+
+                if let layer = layers.first(where: { $0.name == layerName }) {
+                    let performanceSettings = performanceSettingsByLayer[layerName] ?? .default(for: layerName)
+                    let midiRoutingSettings = midiRoutingSettingsByLayer[layerName] ?? .default(for: layerName)
+                    let controlValues = LayerMIDIControlPlanner.controlValues(
+                        layer: layer,
+                        dynamics: phraseEvent.dynamics,
+                        performanceSettings: performanceSettings,
+                        midiRoutingSettings: midiRoutingSettings
+                    )
+                    events.append(
+                        MIDIEvent(
+                            tick: eventTick,
+                            sortOrder: 0,
+                            bytes: [0xB0 | channel, 1, controlValues.modulation]
+                        )
+                    )
+                    events.append(
+                        MIDIEvent(
+                            tick: eventTick,
+                            sortOrder: 0,
+                            bytes: [0xB0 | channel, 11, controlValues.expression]
+                        )
+                    )
+                }
 
                 for note in payload.notes {
                     events.append(

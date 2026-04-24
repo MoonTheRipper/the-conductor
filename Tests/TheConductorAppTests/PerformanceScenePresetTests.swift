@@ -18,6 +18,7 @@ struct PerformanceScenePresetTests {
             layerManualEnabled: ["Strings": true, "Pulse": false],
             layerAssignedInstrumentIDs: ["Strings": "au-demo"],
             layerPerformanceSettings: ["Strings": LayerPerformanceSettings.default(for: "Strings")],
+            layerMIDIRoutingSettings: ["Strings": LayerMIDIRoutingSettings.default(for: "Strings")],
             layerLibraryTargetIDs: ["Strings": "preset::/tmp/legato.exs"],
             layerOutputSettings: ["Strings": LayerOutputSettings.default(for: "Strings")]
         )

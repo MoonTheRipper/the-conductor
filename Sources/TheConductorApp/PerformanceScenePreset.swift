@@ -13,6 +13,7 @@ struct PerformanceSceneSnapshot: Codable, Equatable, Sendable {
     var layerManualEnabled: [String: Bool]
     var layerAssignedInstrumentIDs: [String: String]
     var layerPerformanceSettings: [String: LayerPerformanceSettings]
+    var layerMIDIRoutingSettings: [String: LayerMIDIRoutingSettings]
     var layerLibraryTargetIDs: [String: String]
     var layerOutputSettings: [String: LayerOutputSettings]
 }

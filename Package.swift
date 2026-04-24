@@ -29,5 +29,9 @@ let package = Package(
             name: "ConductorCoreTests",
             dependencies: ["ConductorCore"]
         ),
+        .testTarget(
+            name: "TheConductorAppTests",
+            dependencies: ["TheConductorApp", "ConductorCore"]
+        ),
     ]
 )

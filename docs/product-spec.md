@@ -50,6 +50,7 @@ Loop behavior:
 - allow user-added library folders for sample sources
 - load playable library folders through a sampler when audio or supported preset assets are present
 - expose per-layer preset or sample-target selection inside each assigned library folder
+- expose per-layer articulation, register, density, and note-length controls for orchestration shaping
 - keep the selected target visible in the main control surface
 - label non-hostable targets clearly so discovery and playback status are not conflated
 - expose searchable catalog browsing so large plugin installs stay manageable
@@ -64,10 +65,11 @@ Loop behavior:
 - current chord, interval, loop state, and layer mix visible at a glance
 - layer trims, loop transport, and calibration controls exposed without leaving the main surface
 - standalone routing and effect controls visible without opening a secondary editor
+- per-layer performance shaping visible without opening a secondary editor
 - live beat-intent diagnostics visible while tuning the camera path
 
 ## Post-MVP Directions
 
 1. Move the standalone host/audio core toward a portable layer for cross-platform builds.
-2. Add deeper sampler zoning and articulation mapping for large orchestral libraries.
+2. Add deeper sampler zoning and articulation switching for large orchestral libraries.
 3. Extend standalone hosting beyond Audio Units into real VST3 instantiation.

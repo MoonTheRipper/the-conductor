@@ -30,6 +30,7 @@ The current app is a working local MVP for the product direction we agreed on. I
 - direct standalone Audio Unit playback with one AU assignment per orchestration layer
 - sampler-backed playback for playable library folders assigned per layer
 - per-layer preset or sample-target selection inside each assigned library folder
+- per-layer articulation, register shift, note density, velocity bias, and note-length shaping
 - timestamp-accurate loop replay based on captured gesture commits
 - manual orchestration trims on top of the auto-generated layer mix
 - per-layer bus, pan, reverb, and delay routing in standalone mode
@@ -63,6 +64,7 @@ The current standalone catalog implementation exposes:
 - searchable instrument browsing and assign-selected-to-all flow
 - indexed sample/library folder summaries and selectable playable targets inside each folder
 - per-layer bus and effect routing for richer standalone mixes
+- shared performance shaping so standalone playback, Logic MIDI, and exported MIDI all honor the same layer voicing controls
 
 The current loop and control implementation exposes:
 
@@ -94,5 +96,5 @@ sudo xcodebuild -runFirstLaunch
 ## Post-MVP Expansion Ideas
 
 1. Move the audio/plugin core behind a portable C++ layer for cross-platform builds.
-2. Add deeper sampler zoning and articulation mapping beyond preset-or-batch loading.
+2. Add deeper sampler zoning and articulation switching beyond preset-or-batch loading.
 3. Extend standalone hosting past Audio Units into real VST3 instantiation.

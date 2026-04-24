@@ -7,7 +7,12 @@ import UniformTypeIdentifiers
 final class MIDILoopExportService {
     private let pulsesPerQuarterNote: UInt16 = 480
 
-    func export(loopBuffer: LoopBuffer, layers: [LayerState], options: MIDIExportOptions) throws -> URL {
+    func export(
+        loopBuffer: LoopBuffer,
+        layers: [LayerState],
+        options: MIDIExportOptions,
+        performanceSettingsByLayer: [String: LayerPerformanceSettings]
+    ) throws -> URL {
         guard loopBuffer.phrase.isEmpty == false else {
             throw ExportError.noLoop
         }
@@ -24,13 +29,28 @@ final class MIDILoopExportService {
             throw ExportError.cancelled
         }
 
-        let data = buildMIDIFile(loopBuffer: loopBuffer, layers: layers, options: options)
+        let data = buildMIDIFile(
+            loopBuffer: loopBuffer,
+            layers: layers,
+            options: options,
+            performanceSettingsByLayer: performanceSettingsByLayer
+        )
         try data.write(to: url, options: .atomic)
         return url
     }
 
-    private func buildMIDIFile(loopBuffer: LoopBuffer, layers: [LayerState], options: MIDIExportOptions) -> Data {
-        let tracks = buildTracks(loopBuffer: loopBuffer, layers: layers, options: options)
+    private func buildMIDIFile(
+        loopBuffer: LoopBuffer,
+        layers: [LayerState],
+        options: MIDIExportOptions,
+        performanceSettingsByLayer: [String: LayerPerformanceSettings]
+    ) -> Data {
+        let tracks = buildTracks(
+            loopBuffer: loopBuffer,
+            layers: layers,
+            options: options,
+            performanceSettingsByLayer: performanceSettingsByLayer
+        )
 
         var file = Data()
         file.append(ascii: "MThd")
@@ -47,7 +67,12 @@ final class MIDILoopExportService {
         return file
     }
 
-    private func buildTracks(loopBuffer: LoopBuffer, layers: [LayerState], options: MIDIExportOptions) -> [Data] {
+    private func buildTracks(
+        loopBuffer: LoopBuffer,
+        layers: [LayerState],
+        options: MIDIExportOptions,
+        performanceSettingsByLayer: [String: LayerPerformanceSettings]
+    ) -> [Data] {
         var tracks: [Data] = [buildTempoTrack(loopBuffer: loopBuffer, options: options)]
 
         for layerName in PerformanceLayerPlanner.layerNames {
@@ -55,7 +80,8 @@ final class MIDILoopExportService {
                 loopBuffer: loopBuffer,
                 layers: layers,
                 layerName: layerName,
-                options: options
+                options: options,
+                performanceSettingsByLayer: performanceSettingsByLayer
             )
             if track.isEmpty == false {
                 tracks.append(track)
@@ -101,7 +127,8 @@ final class MIDILoopExportService {
         loopBuffer: LoopBuffer,
         layers: [LayerState],
         layerName: String,
-        options: MIDIExportOptions
+        options: MIDIExportOptions,
+        performanceSettingsByLayer: [String: LayerPerformanceSettings]
     ) -> Data {
         let ticksPerSecond = Double(pulsesPerQuarterNote) * 2.0
         let loopStart = loopBuffer.startTimestamp ?? loopBuffer.phrase.first?.timestamp ?? 0.0
@@ -127,15 +154,15 @@ final class MIDILoopExportService {
                     chord: phraseEvent.chord,
                     interval: phraseEvent.interval,
                     dynamics: phraseEvent.dynamics,
-                    layers: layers
+                    layers: layers,
+                    performanceSettingsByLayer: performanceSettingsByLayer
                 ).first(where: { $0.name == layerName })
 
                 guard let payload else { continue }
 
                 let eventTick = Int(max(0.0, phraseEvent.timestamp - loopStart + cycleOffset) * ticksPerSecond)
-                let holdDuration = 0.45 + (phraseEvent.dynamics * 0.65)
                 let noteOffTick = Int(
-                    min(loopDuration, max(0.1, phraseEvent.timestamp - loopStart + cycleOffset + holdDuration)) * ticksPerSecond
+                    min(loopDuration, max(0.1, phraseEvent.timestamp - loopStart + cycleOffset + payload.holdDuration)) * ticksPerSecond
                 )
 
                 for note in payload.notes {

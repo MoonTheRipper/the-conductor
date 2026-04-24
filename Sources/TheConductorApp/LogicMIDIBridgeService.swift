@@ -100,7 +100,8 @@ final class LogicMIDIBridgeService: ObservableObject {
         chord: ChordSelection,
         interval: IntervalChoice,
         dynamics: Double,
-        layers: [LayerState]
+        layers: [LayerState],
+        performanceSettingsByLayer: [String: LayerPerformanceSettings]
     ) {
         guard hasOutputTarget else {
             statusText = "No MIDI target selected"
@@ -111,7 +112,8 @@ final class LogicMIDIBridgeService: ObservableObject {
             chord: chord,
             interval: interval,
             dynamics: dynamics,
-            layers: layers
+            layers: layers,
+            performanceSettingsByLayer: performanceSettingsByLayer
         )
 
         guard payloads.isEmpty == false else {
@@ -129,10 +131,18 @@ final class LogicMIDIBridgeService: ObservableObject {
                 [UInt8(0x90 | payload.channel), note, payload.velocity]
             }
             dispatch(bytes: bytes)
+
+            let noteOffBytes = payload.notes.flatMap { note in
+                [UInt8(0x80 | payload.channel), note, 0]
+            }
+            DispatchQueue.main.asyncAfter(deadline: .now() + payload.holdDuration) { [weak self] in
+                guard let self, self.noteGeneration == generation else { return }
+                self.dispatch(bytes: noteOffBytes)
+            }
         }
 
-        let holdDuration = 0.45 + (dynamics * 0.65)
-        DispatchQueue.main.asyncAfter(deadline: .now() + holdDuration) { [weak self] in
+        let cleanupDuration = (payloads.map(\.holdDuration).max() ?? (0.45 + (dynamics * 0.65))) + 0.08
+        DispatchQueue.main.asyncAfter(deadline: .now() + cleanupDuration) { [weak self] in
             guard let self, self.noteGeneration == generation else { return }
             self.emitAllNotesOff()
         }

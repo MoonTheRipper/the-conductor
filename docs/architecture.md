@@ -40,6 +40,7 @@ Native macOS presentation shell:
 - sampler-backed layer hosting for indexed library folders
 - per-layer preset and sample-target selection inside indexed library folders
 - per-layer bus, pan, delay, and reverb routing inside the host graph
+- shared per-layer articulation and voicing controls that affect standalone playback, Logic MIDI, and export
 - loop transport and MIDI export controls in the desktop shell
 - searchable catalog UI and indexed library summaries for current sampler-backed hosting
 - live beat-intent diagnostics driven by smoothed hand-tracking confidence

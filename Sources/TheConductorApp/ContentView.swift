@@ -217,6 +217,7 @@ struct ContentView: View {
                 Text("Orchestration")
                     .sectionTitle()
                 Spacer()
+                actionButton("Reset Voices", color: .cyan, action: viewModel.resetLayerPerformanceSettings)
                 actionButton("Reset FX", color: .purple, action: viewModel.resetLayerOutputRouting)
                 Text("Manual trims")
                     .font(.system(size: 11, weight: .bold, design: .rounded))
@@ -256,6 +257,54 @@ struct ContentView: View {
 
                     Slider(value: viewModel.layerGainBinding(for: layer.name), in: 0...1.5)
                         .tint(layer.isEnabled ? .orange : .gray)
+
+                    VStack(alignment: .leading, spacing: 8) {
+                        HStack {
+                            Text("Performance")
+                                .font(.system(size: 11, weight: .bold, design: .rounded))
+                                .foregroundStyle(.white.opacity(0.58))
+                            Spacer()
+                            Text(viewModel.layerPerformanceSummary(for: layer.name))
+                                .font(.system(size: 11, weight: .medium, design: .rounded))
+                                .foregroundStyle(.white.opacity(0.52))
+                        }
+
+                        Picker("\(layer.name) Articulation", selection: viewModel.layerArticulationBinding(for: layer.name)) {
+                            ForEach(LayerArticulationStyle.allCases) { articulation in
+                                Text("\(articulation.rawValue) · \(articulation.summaryText)").tag(articulation)
+                            }
+                        }
+                        .pickerStyle(.menu)
+
+                        compactStepperRow(
+                            title: "Register",
+                            value: viewModel.layerPerformanceIntBinding(for: layer.name, keyPath: \.octaveShift),
+                            range: -2...2,
+                            valueText: { value in
+                                value == 0 ? "0 oct" : "\(value > 0 ? "+" : "")\(value) oct"
+                            }
+                        )
+
+                        compactStepperRow(
+                            title: "Voices",
+                            value: viewModel.layerPerformanceIntBinding(for: layer.name, keyPath: \.maxVoices),
+                            range: 1...5,
+                            valueText: { value in "\(value)" }
+                        )
+
+                        sliderRow(
+                            title: "Velocity Bias",
+                            value: viewModel.layerPerformanceDoubleBinding(for: layer.name, keyPath: \.velocityBias),
+                            range: -24...24
+                        )
+
+                        sliderRow(
+                            title: "Length Scale",
+                            value: viewModel.layerPerformanceDoubleBinding(for: layer.name, keyPath: \.holdScale),
+                            range: 0.25...1.8
+                        )
+                    }
+                    .padding(.top, 2)
 
                     VStack(alignment: .leading, spacing: 8) {
                         HStack {
@@ -692,6 +741,26 @@ struct ContentView: View {
 
             Slider(value: value, in: range)
                 .tint(.orange)
+        }
+    }
+
+    private func compactStepperRow(
+        title: String,
+        value: Binding<Int>,
+        range: ClosedRange<Int>,
+        valueText: @escaping (Int) -> String
+    ) -> some View {
+        HStack {
+            Text(title)
+                .font(.system(size: 12, weight: .semibold, design: .rounded))
+                .foregroundStyle(.white.opacity(0.72))
+            Spacer()
+            Stepper(value: value, in: range) {
+                Text(valueText(value.wrappedValue))
+                    .font(.system(size: 12, weight: .bold, design: .rounded))
+                    .foregroundStyle(.white.opacity(0.85))
+            }
+            .fixedSize()
         }
     }
 

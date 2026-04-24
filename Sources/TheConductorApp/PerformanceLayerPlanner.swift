@@ -6,6 +6,7 @@ struct PlaybackLayerPayload {
     let channel: UInt8
     let notes: [UInt8]
     let velocity: UInt8
+    let holdDuration: Double
 }
 
 enum PerformanceLayerPlanner {
@@ -32,7 +33,8 @@ enum PerformanceLayerPlanner {
         chord: ChordSelection,
         interval: IntervalChoice,
         dynamics: Double,
-        layers: [LayerState]
+        layers: [LayerState],
+        performanceSettingsByLayer: [String: LayerPerformanceSettings] = [:]
     ) -> [PlaybackLayerPayload] {
         layerChannels.compactMap { mapping in
             guard let layer = layers.first(where: { $0.name == mapping.name }) else {
@@ -42,24 +44,42 @@ enum PerformanceLayerPlanner {
                 return nil
             }
 
+            let performanceSettings = performanceSettingsByLayer[mapping.name] ?? .default(for: mapping.name)
             let notes = voicing(
                 for: mapping.name,
                 chord: chord,
                 interval: interval,
-                dynamics: dynamics
+                dynamics: dynamics,
+                performanceSettings: performanceSettings
             )
 
             guard notes.isEmpty == false else { return nil }
 
+            let baseVelocity = Double(max(24, min(124, Int(34 + (dynamics * 48) + (layer.mix * 36)))))
             let velocity = UInt8(
-                max(24, min(124, Int(34 + (dynamics * 48) + (layer.mix * 36))))
+                max(
+                    18,
+                    min(
+                        124,
+                        Int((baseVelocity * performanceSettings.articulation.velocityMultiplier) + performanceSettings.velocityBias)
+                    )
+                )
+            )
+            let baseHoldDuration = 0.45 + (dynamics * 0.65)
+            let holdDuration = max(
+                0.08,
+                min(
+                    3.2,
+                    baseHoldDuration * performanceSettings.articulation.holdMultiplier * performanceSettings.holdScale
+                )
             )
 
             return PlaybackLayerPayload(
                 name: mapping.name,
                 channel: mapping.channel,
                 notes: notes,
-                velocity: velocity
+                velocity: velocity,
+                holdDuration: holdDuration
             )
         }
     }
@@ -68,7 +88,8 @@ enum PerformanceLayerPlanner {
         for layerName: String,
         chord: ChordSelection,
         interval: IntervalChoice,
-        dynamics: Double
+        dynamics: Double,
+        performanceSettings: LayerPerformanceSettings
     ) -> [UInt8] {
         let root = 48 + chord.root.rawValue
         let tones = chordToneOffsets(for: chord.quality)
@@ -110,11 +131,16 @@ enum PerformanceLayerPlanner {
             candidateNotes = [root, root + third, root + fifth, root + top]
         }
 
-        let normalized = Set(candidateNotes)
+        let transposed = Set(candidateNotes.map { $0 + (performanceSettings.octaveShift * 12) })
             .filter { 0...127 ~= $0 }
             .sorted()
+        let limited = limitedVoicing(
+            transposed,
+            maxVoices: max(performanceSettings.maxVoices, 1),
+            preferLowerRegister: layerName == "Pulse"
+        )
 
-        return normalized.map(UInt8.init)
+        return limited.map(UInt8.init)
     }
 
     private static func chordToneOffsets(for quality: ChordQuality) -> [Int] {
@@ -140,6 +166,39 @@ enum PerformanceLayerPlanner {
         case .minor6:
             return [0, 3, 7, 9]
         }
+    }
+
+    private static func limitedVoicing(
+        _ notes: [Int],
+        maxVoices: Int,
+        preferLowerRegister: Bool
+    ) -> [Int] {
+        guard notes.count > maxVoices else { return notes }
+        guard maxVoices > 0 else { return [] }
+
+        if preferLowerRegister {
+            return Array(notes.prefix(maxVoices))
+        }
+
+        if maxVoices == 1 {
+            return [notes.last ?? notes[0]]
+        }
+
+        if maxVoices == 2 {
+            return [notes[0], notes[notes.count - 1]]
+        }
+
+        let step = Double(notes.count - 1) / Double(maxVoices - 1)
+        var selectedIndices = Set([0, notes.count - 1])
+        for slot in 1..<(maxVoices - 1) {
+            let index = Int((Double(slot) * step).rounded())
+            selectedIndices.insert(index)
+        }
+
+        return selectedIndices
+            .sorted()
+            .prefix(maxVoices)
+            .map { notes[$0] }
     }
 }
 

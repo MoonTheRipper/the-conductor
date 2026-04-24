@@ -6,8 +6,10 @@ import Foundation
 struct LayerHostedInstrumentSelection {
     let layerName: String
     let instrument: InstrumentDescriptor?
+    let selectionSignature: String
     let audioUnitDescription: AudioComponentDescription?
     let sampleLibraryLoadPlan: SampleLibraryLoadPlan?
+    let performanceSettings: LayerPerformanceSettings
     let outputSettings: LayerOutputSettings
     let capabilitySummary: String
 }
@@ -29,6 +31,7 @@ private enum HostedLayerKind {
 private final class HostedLayerSlot {
     let layerName: String
     let instrumentID: String
+    let selectionSignature: String
     let instrumentName: String
     let hostedKind: HostedLayerKind
     let sourceSummaryText: String
@@ -36,11 +39,13 @@ private final class HostedLayerSlot {
     let layerMixer: AVAudioMixerNode
     let delay: AVAudioUnitDelay
     let reverb: AVAudioUnitReverb
+    var performanceSettings: LayerPerformanceSettings
     var outputSettings: LayerOutputSettings
 
     init(
         layerName: String,
         instrumentID: String,
+        selectionSignature: String,
         instrumentName: String,
         hostedKind: HostedLayerKind,
         sourceSummaryText: String,
@@ -48,10 +53,12 @@ private final class HostedLayerSlot {
         layerMixer: AVAudioMixerNode,
         delay: AVAudioUnitDelay,
         reverb: AVAudioUnitReverb,
+        performanceSettings: LayerPerformanceSettings,
         outputSettings: LayerOutputSettings
     ) {
         self.layerName = layerName
         self.instrumentID = instrumentID
+        self.selectionSignature = selectionSignature
         self.instrumentName = instrumentName
         self.hostedKind = hostedKind
         self.sourceSummaryText = sourceSummaryText
@@ -59,11 +66,12 @@ private final class HostedLayerSlot {
         self.layerMixer = layerMixer
         self.delay = delay
         self.reverb = reverb
+        self.performanceSettings = performanceSettings
         self.outputSettings = outputSettings
     }
 
     var topologyText: String {
-        "\(sourceSummaryText) -> \(outputSettings.bus.rawValue) bus · pan \(Int(outputSettings.pan * 100)) · space \(Int(outputSettings.reverbMix))% · echo \(Int(outputSettings.delayMix))%"
+        "\(sourceSummaryText) -> \(outputSettings.bus.rawValue) bus · \(performanceSettings.topologyText) · pan \(Int(outputSettings.pan * 100)) · space \(Int(outputSettings.reverbMix))% · echo \(Int(outputSettings.delayMix))%"
     }
 }
 
@@ -107,8 +115,9 @@ final class StandaloneAudioHostService: ObservableObject {
             }
 
             if let existingSlot = layerSlotsByName[selection.layerName],
-               existingSlot.instrumentID == instrument.id,
+               existingSlot.selectionSignature == selection.selectionSignature,
                matchesHostedKind(of: existingSlot, for: instrument) {
+                existingSlot.performanceSettings = selection.performanceSettings
                 applyOutputSettings(selection.outputSettings, to: existingSlot)
                 readyLayers.append(selection.layerName)
                 continue
@@ -125,8 +134,10 @@ final class StandaloneAudioHostService: ObservableObject {
                 loadAudioUnit(
                     layerName: selection.layerName,
                     instrumentID: instrument.id,
+                    selectionSignature: selection.selectionSignature,
                     instrumentName: instrument.name,
                     description: description,
+                    performanceSettings: selection.performanceSettings,
                     outputSettings: selection.outputSettings
                 )
                 readyLayers.append(selection.layerName)
@@ -141,8 +152,10 @@ final class StandaloneAudioHostService: ObservableObject {
                 loadSampleLibrary(
                     layerName: selection.layerName,
                     instrumentID: instrument.id,
+                    selectionSignature: selection.selectionSignature,
                     instrumentName: sampleLibraryLoadPlan.displayName,
                     loadPlan: sampleLibraryLoadPlan,
+                    performanceSettings: selection.performanceSettings,
                     outputSettings: selection.outputSettings
                 )
                 readyLayers.append(selection.layerName)
@@ -171,7 +184,8 @@ final class StandaloneAudioHostService: ObservableObject {
         chord: ChordSelection,
         interval: IntervalChoice,
         dynamics: Double,
-        layers: [LayerState]
+        layers: [LayerState],
+        performanceSettingsByLayer: [String: LayerPerformanceSettings]
     ) {
         guard layerSlotsByName.isEmpty == false else {
             statusText = "No standalone targets loaded for playback"
@@ -184,7 +198,8 @@ final class StandaloneAudioHostService: ObservableObject {
             chord: chord,
             interval: interval,
             dynamics: dynamics,
-            layers: layers
+            layers: layers,
+            performanceSettingsByLayer: performanceSettingsByLayer
         )
 
         guard payloads.isEmpty == false else {
@@ -217,11 +232,12 @@ final class StandaloneAudioHostService: ObservableObject {
             return
         }
 
-        let holdDuration = 0.45 + (dynamics * 0.65)
-        DispatchQueue.main.asyncAfter(deadline: .now() + holdDuration) { [weak self] in
-            guard let self, self.noteGeneration == generation else { return }
-            Task { @MainActor in
-                self.silenceAllNotes()
+        for payload in payloads {
+            DispatchQueue.main.asyncAfter(deadline: .now() + payload.holdDuration) { [weak self] in
+                guard let self, self.noteGeneration == generation else { return }
+                Task { @MainActor in
+                    self.silenceNotes(for: payload.name)
+                }
             }
         }
 
@@ -284,8 +300,10 @@ final class StandaloneAudioHostService: ObservableObject {
     private func loadAudioUnit(
         layerName: String,
         instrumentID: String,
+        selectionSignature: String,
         instrumentName: String,
         description: AudioComponentDescription,
+        performanceSettings: LayerPerformanceSettings,
         outputSettings: LayerOutputSettings
     ) {
         unloadSlot(for: layerName)
@@ -306,6 +324,7 @@ final class StandaloneAudioHostService: ObservableObject {
         let slot = HostedLayerSlot(
             layerName: layerName,
             instrumentID: instrumentID,
+            selectionSignature: selectionSignature,
             instrumentName: instrumentName,
             hostedKind: .audioUnit,
             sourceSummaryText: "Audio Unit",
@@ -313,6 +332,7 @@ final class StandaloneAudioHostService: ObservableObject {
             layerMixer: layerMixer,
             delay: delay,
             reverb: reverb,
+            performanceSettings: performanceSettings,
             outputSettings: outputSettings
         )
 
@@ -324,8 +344,10 @@ final class StandaloneAudioHostService: ObservableObject {
     private func loadSampleLibrary(
         layerName: String,
         instrumentID: String,
+        selectionSignature: String,
         instrumentName: String,
         loadPlan: SampleLibraryLoadPlan,
+        performanceSettings: LayerPerformanceSettings,
         outputSettings: LayerOutputSettings
     ) {
         unloadSlot(for: layerName)
@@ -351,6 +373,7 @@ final class StandaloneAudioHostService: ObservableObject {
             let slot = HostedLayerSlot(
                 layerName: layerName,
                 instrumentID: instrumentID,
+                selectionSignature: selectionSignature,
                 instrumentName: instrumentName,
                 hostedKind: .sampler,
                 sourceSummaryText: resolvedHostSummary,
@@ -358,6 +381,7 @@ final class StandaloneAudioHostService: ObservableObject {
                 layerMixer: layerMixer,
                 delay: delay,
                 reverb: reverb,
+                performanceSettings: performanceSettings,
                 outputSettings: outputSettings
             )
 

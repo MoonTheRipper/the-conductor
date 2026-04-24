@@ -86,6 +86,7 @@ final class SessionViewModel: ObservableObject {
     @Published private(set) var layerMixMultipliers: [String: Double]
     @Published private(set) var layerManualEnabled: [String: Bool]
     @Published private(set) var layerAssignedInstrumentIDs: [String: String]
+    @Published private(set) var layerPerformanceSettings: [String: LayerPerformanceSettings]
     @Published private(set) var layerLibraryTargetIDs: [String: String]
     @Published private(set) var layerOutputSettings: [String: LayerOutputSettings]
     @Published private(set) var liveBeatConfidence = 0.0
@@ -111,6 +112,7 @@ final class SessionViewModel: ObservableObject {
     private static let layerMixDefaultsKey = "TheConductor.layerMixMultipliers"
     private static let layerEnabledDefaultsKey = "TheConductor.layerManualEnabled"
     private static let layerAssignmentsDefaultsKey = "TheConductor.layerAssignedInstrumentIDs"
+    private static let layerPerformanceSettingsDefaultsKey = "TheConductor.layerPerformanceSettings"
     private static let layerLibraryTargetsDefaultsKey = "TheConductor.layerLibraryTargetIDs"
     private static let layerOutputSettingsDefaultsKey = "TheConductor.layerOutputSettings"
     private static let exportOptionsDefaultsKey = "TheConductor.exportOptions"
@@ -127,6 +129,7 @@ final class SessionViewModel: ObservableObject {
         self.layerMixMultipliers = Self.loadLayerMixMultipliers()
         self.layerManualEnabled = Self.loadLayerManualEnabled()
         self.layerAssignedInstrumentIDs = Self.loadLayerAssignments()
+        self.layerPerformanceSettings = Self.loadLayerPerformanceSettings()
         self.layerLibraryTargetIDs = Self.loadLayerLibraryTargets()
         self.layerOutputSettings = Self.loadLayerOutputSettings()
         bindLiveTracking()
@@ -322,6 +325,51 @@ final class SessionViewModel: ObservableObject {
         )
     }
 
+    func layerArticulationBinding(for layerName: String) -> Binding<LayerArticulationStyle> {
+        Binding(
+            get: { self.layerPerformanceSettings[layerName]?.articulation ?? LayerPerformanceSettings.default(for: layerName).articulation },
+            set: { newValue in
+                var settings = self.layerPerformanceSettings[layerName] ?? LayerPerformanceSettings.default(for: layerName)
+                settings.articulation = newValue
+                self.layerPerformanceSettings[layerName] = settings
+                self.persistLayerPerformanceSettings()
+                self.configureStandaloneSelection()
+            }
+        )
+    }
+
+    func layerPerformanceIntBinding(
+        for layerName: String,
+        keyPath: WritableKeyPath<LayerPerformanceSettings, Int>
+    ) -> Binding<Int> {
+        Binding(
+            get: { self.layerPerformanceSettings[layerName]?[keyPath: keyPath] ?? LayerPerformanceSettings.default(for: layerName)[keyPath: keyPath] },
+            set: { newValue in
+                var settings = self.layerPerformanceSettings[layerName] ?? LayerPerformanceSettings.default(for: layerName)
+                settings[keyPath: keyPath] = newValue
+                self.layerPerformanceSettings[layerName] = settings
+                self.persistLayerPerformanceSettings()
+                self.configureStandaloneSelection()
+            }
+        )
+    }
+
+    func layerPerformanceDoubleBinding(
+        for layerName: String,
+        keyPath: WritableKeyPath<LayerPerformanceSettings, Double>
+    ) -> Binding<Double> {
+        Binding(
+            get: { self.layerPerformanceSettings[layerName]?[keyPath: keyPath] ?? LayerPerformanceSettings.default(for: layerName)[keyPath: keyPath] },
+            set: { newValue in
+                var settings = self.layerPerformanceSettings[layerName] ?? LayerPerformanceSettings.default(for: layerName)
+                settings[keyPath: keyPath] = newValue
+                self.layerPerformanceSettings[layerName] = settings
+                self.persistLayerPerformanceSettings()
+                self.configureStandaloneSelection()
+            }
+        )
+    }
+
     func layerLibraryTargetBinding(for layerName: String) -> Binding<String> {
         Binding(
             get: { self.layerLibraryTargetIDs[layerName] ?? "" },
@@ -388,6 +436,10 @@ final class SessionViewModel: ObservableObject {
 
     func layerOutputSummary(for layerName: String) -> String {
         (layerOutputSettings[layerName] ?? LayerOutputSettings.default(for: layerName)).summaryText
+    }
+
+    func layerPerformanceSummary(for layerName: String) -> String {
+        (layerPerformanceSettings[layerName] ?? LayerPerformanceSettings.default(for: layerName)).summaryText
     }
 
     func layerLibraryTargetSummary(for layerName: String) -> String? {
@@ -482,6 +534,12 @@ final class SessionViewModel: ObservableObject {
         configureStandaloneSelection()
     }
 
+    func resetLayerPerformanceSettings() {
+        layerPerformanceSettings = Self.defaultLayerPerformanceSettings
+        persistLayerPerformanceSettings()
+        configureStandaloneSelection()
+    }
+
     func resetCalibration() {
         calibration = GestureCalibration()
     }
@@ -491,7 +549,8 @@ final class SessionViewModel: ObservableObject {
             let url = try loopExportService.export(
                 loopBuffer: performanceState.loopBuffer,
                 layers: effectiveLayers,
-                options: exportOptions
+                options: exportOptions,
+                performanceSettingsByLayer: layerPerformanceSettings
             )
             exportStatusText = "Exported layer-aware MIDI to \(url.lastPathComponent)"
         } catch ExportError.cancelled {
@@ -890,14 +949,16 @@ final class SessionViewModel: ObservableObject {
                 chord: chord,
                 interval: interval,
                 dynamics: dynamics,
-                layers: effectiveLayers
+                layers: effectiveLayers,
+                performanceSettingsByLayer: layerPerformanceSettings
             )
         case .logicBridge:
             midiBridgeService.send(
                 chord: chord,
                 interval: interval,
                 dynamics: dynamics,
-                layers: effectiveLayers
+                layers: effectiveLayers,
+                performanceSettingsByLayer: layerPerformanceSettings
             )
         }
     }
@@ -931,13 +992,24 @@ final class SessionViewModel: ObservableObject {
             let supportSummary = instrumentID.isEmpty
                 ? "No standalone target assigned"
                 : standaloneCatalogService.standaloneCapabilitySummary(for: instrumentID)
+            let performanceSettings = layerPerformanceSettings[layerName] ?? LayerPerformanceSettings.default(for: layerName)
             let outputSettings = layerOutputSettings[layerName] ?? LayerOutputSettings.default(for: layerName)
+            let selectionSignature: String
+            if let instrument, instrument.format == .sampleLibrary, let sampleLibraryLoadPlan {
+                selectionSignature = "\(instrument.id)::\(sampleLibraryLoadPlan.target.id)"
+            } else if let instrument {
+                selectionSignature = instrument.id
+            } else {
+                selectionSignature = "\(layerName)::unassigned"
+            }
 
             return LayerHostedInstrumentSelection(
                 layerName: layerName,
                 instrument: instrument,
+                selectionSignature: selectionSignature,
                 audioUnitDescription: audioUnitDescription,
                 sampleLibraryLoadPlan: sampleLibraryLoadPlan,
+                performanceSettings: performanceSettings,
                 outputSettings: outputSettings,
                 capabilitySummary: supportSummary
             )
@@ -1000,6 +1072,11 @@ final class SessionViewModel: ObservableObject {
         UserDefaults.standard.set(layerAssignedInstrumentIDs, forKey: Self.layerAssignmentsDefaultsKey)
     }
 
+    private func persistLayerPerformanceSettings() {
+        guard let data = try? JSONEncoder().encode(layerPerformanceSettings) else { return }
+        UserDefaults.standard.set(data, forKey: Self.layerPerformanceSettingsDefaultsKey)
+    }
+
     private func persistLayerLibraryTargets() {
         UserDefaults.standard.set(layerLibraryTargetIDs, forKey: Self.layerLibraryTargetsDefaultsKey)
     }
@@ -1040,6 +1117,15 @@ final class SessionViewModel: ObservableObject {
         )
         let stored = UserDefaults.standard.dictionary(forKey: layerAssignmentsDefaultsKey) as? [String: String] ?? [:]
         merged.merge(stored) { _, stored in stored }
+        return merged
+    }
+
+    private static func loadLayerPerformanceSettings() -> [String: LayerPerformanceSettings] {
+        var merged = defaultLayerPerformanceSettings
+        if let data = UserDefaults.standard.data(forKey: layerPerformanceSettingsDefaultsKey),
+           let stored = try? JSONDecoder().decode([String: LayerPerformanceSettings].self, from: data) {
+            merged.merge(stored) { _, stored in stored }
+        }
         return merged
     }
 
@@ -1117,6 +1203,12 @@ final class SessionViewModel: ObservableObject {
     private static var defaultLayerOutputSettings: [String: LayerOutputSettings] {
         Dictionary(uniqueKeysWithValues: PerformanceLayerPlanner.layerNames.map {
             ($0, LayerOutputSettings.default(for: $0))
+        })
+    }
+
+    private static var defaultLayerPerformanceSettings: [String: LayerPerformanceSettings] {
+        Dictionary(uniqueKeysWithValues: PerformanceLayerPlanner.layerNames.map {
+            ($0, LayerPerformanceSettings.default(for: $0))
         })
     }
 

@@ -83,6 +83,9 @@ final class SessionViewModel: ObservableObject {
     @Published var exportOptions: MIDIExportOptions {
         didSet { persistExportOptions() }
     }
+    @Published var scenePresetName = ""
+    @Published var selectedScenePresetID = ""
+    @Published private(set) var scenePresets: [PerformanceScenePreset]
     @Published private(set) var layerMixMultipliers: [String: Double]
     @Published private(set) var layerManualEnabled: [String: Bool]
     @Published private(set) var layerAssignedInstrumentIDs: [String: String]
@@ -116,6 +119,7 @@ final class SessionViewModel: ObservableObject {
     private static let layerLibraryTargetsDefaultsKey = "TheConductor.layerLibraryTargetIDs"
     private static let layerOutputSettingsDefaultsKey = "TheConductor.layerOutputSettings"
     private static let exportOptionsDefaultsKey = "TheConductor.exportOptions"
+    private static let scenePresetsDefaultsKey = "TheConductor.scenePresets"
 
     init() {
         let engine = PerformanceEngine(keyCenter: .c)
@@ -126,12 +130,15 @@ final class SessionViewModel: ObservableObject {
         self.debugState = .seed
         self.calibration = Self.loadCalibration()
         self.exportOptions = Self.loadExportOptions()
+        self.scenePresets = Self.loadScenePresets()
         self.layerMixMultipliers = Self.loadLayerMixMultipliers()
         self.layerManualEnabled = Self.loadLayerManualEnabled()
         self.layerAssignedInstrumentIDs = Self.loadLayerAssignments()
         self.layerPerformanceSettings = Self.loadLayerPerformanceSettings()
         self.layerLibraryTargetIDs = Self.loadLayerLibraryTargets()
         self.layerOutputSettings = Self.loadLayerOutputSettings()
+        self.scenePresetName = scenePresets.first?.name ?? ""
+        self.selectedScenePresetID = scenePresets.first.map { $0.id.uuidString } ?? ""
         bindLiveTracking()
         bindMIDIBridge()
         bindStandaloneCatalog()
@@ -229,6 +236,10 @@ final class SessionViewModel: ObservableObject {
             guard let instrumentName = standaloneLoadedLayerNames[layerName] else { return nil }
             return "\(layerName): \(instrumentName)"
         }
+    }
+
+    var selectedScenePreset: PerformanceScenePreset? {
+        scenePresets.first { $0.id.uuidString == selectedScenePresetID }
     }
 
     func binding<Value>(_ keyPath: WritableKeyPath<DebugGestureState, Value>) -> Binding<Value> {
@@ -446,6 +457,13 @@ final class SessionViewModel: ObservableObject {
         selectedLayerLibraryTarget(for: layerName)?.detailText
     }
 
+    func selectScenePreset(id: String) {
+        selectedScenePresetID = id
+        if let preset = selectedScenePreset {
+            scenePresetName = preset.name
+        }
+    }
+
     func startLiveTracking() {
         liveTrackingService.start()
     }
@@ -558,6 +576,52 @@ final class SessionViewModel: ObservableObject {
         } catch {
             exportStatusText = error.localizedDescription
         }
+    }
+
+    func saveNewScenePreset() {
+        let trimmedName = scenePresetName.trimmingCharacters(in: .whitespacesAndNewlines)
+        let name = trimmedName.isEmpty ? defaultScenePresetName() : trimmedName
+        let preset = PerformanceScenePreset(
+            name: name,
+            updatedAt: .now,
+            snapshot: capturedSceneSnapshot()
+        )
+        scenePresets.insert(preset, at: 0)
+        selectedScenePresetID = preset.id.uuidString
+        scenePresetName = preset.name
+        persistScenePresets()
+    }
+
+    func updateSelectedScenePreset() {
+        guard let selectedIndex = scenePresets.firstIndex(where: { $0.id.uuidString == selectedScenePresetID }) else {
+            saveNewScenePreset()
+            return
+        }
+
+        let trimmedName = scenePresetName.trimmingCharacters(in: .whitespacesAndNewlines)
+        scenePresets[selectedIndex].name = trimmedName.isEmpty ? scenePresets[selectedIndex].name : trimmedName
+        scenePresets[selectedIndex].updatedAt = .now
+        scenePresets[selectedIndex].snapshot = capturedSceneSnapshot()
+        scenePresetName = scenePresets[selectedIndex].name
+        persistScenePresets()
+    }
+
+    func loadSelectedScenePreset() {
+        guard let preset = selectedScenePreset else { return }
+        applyScenePreset(preset)
+    }
+
+    func deleteSelectedScenePreset() {
+        guard let selectedPreset = selectedScenePreset else { return }
+        scenePresets.removeAll { $0.id == selectedPreset.id }
+        if let nextPreset = scenePresets.first {
+            selectedScenePresetID = nextPreset.id.uuidString
+            scenePresetName = nextPreset.name
+        } else {
+            selectedScenePresetID = ""
+            scenePresetName = ""
+        }
+        persistScenePresets()
     }
 
     func pulseCommit() {
@@ -1086,6 +1150,11 @@ final class SessionViewModel: ObservableObject {
         UserDefaults.standard.set(data, forKey: Self.layerOutputSettingsDefaultsKey)
     }
 
+    private func persistScenePresets() {
+        guard let data = try? JSONEncoder().encode(scenePresets) else { return }
+        UserDefaults.standard.set(data, forKey: Self.scenePresetsDefaultsKey)
+    }
+
     private static func loadCalibration() -> GestureCalibration {
         guard
             let data = UserDefaults.standard.data(forKey: calibrationDefaultsKey),
@@ -1157,6 +1226,17 @@ final class SessionViewModel: ObservableObject {
         return options
     }
 
+    private static func loadScenePresets() -> [PerformanceScenePreset] {
+        guard
+            let data = UserDefaults.standard.data(forKey: scenePresetsDefaultsKey),
+            let presets = try? JSONDecoder().decode([PerformanceScenePreset].self, from: data)
+        else {
+            return []
+        }
+
+        return presets.sorted { $0.updatedAt > $1.updatedAt }
+    }
+
     private func normalizeLayerAssignments() {
         let validIDs = Set(availableInstruments.map(\.id))
         for layerName in PerformanceLayerPlanner.layerNames {
@@ -1190,6 +1270,66 @@ final class SessionViewModel: ObservableObject {
         }
 
         persistLayerLibraryTargets()
+    }
+
+    private func capturedSceneSnapshot() -> PerformanceSceneSnapshot {
+        PerformanceSceneSnapshot(
+            routingMode: routingMode,
+            trackingMode: trackingMode,
+            keyCenter: keyCenter,
+            selectedInstrumentID: selectedInstrumentID,
+            sendToVirtualMIDISource: sendToVirtualMIDISource,
+            calibration: calibration,
+            exportOptions: exportOptions,
+            layerMixMultipliers: layerMixMultipliers,
+            layerManualEnabled: layerManualEnabled,
+            layerAssignedInstrumentIDs: layerAssignedInstrumentIDs,
+            layerPerformanceSettings: layerPerformanceSettings,
+            layerLibraryTargetIDs: layerLibraryTargetIDs,
+            layerOutputSettings: layerOutputSettings
+        )
+    }
+
+    private func applyScenePreset(_ preset: PerformanceScenePreset) {
+        let snapshot = preset.snapshot
+        scenePresetName = preset.name
+        selectedScenePresetID = preset.id.uuidString
+
+        trackingMode = snapshot.trackingMode
+        routingMode = snapshot.routingMode
+        keyCenter = snapshot.keyCenter
+        selectedInstrumentID = snapshot.selectedInstrumentID
+        sendToVirtualMIDISource = snapshot.sendToVirtualMIDISource
+        calibration = snapshot.calibration
+        exportOptions = snapshot.exportOptions
+        layerMixMultipliers = Self.defaultLayerMixMultipliers.merging(snapshot.layerMixMultipliers) { _, stored in stored }
+        layerManualEnabled = Self.defaultLayerManualEnabled.merging(snapshot.layerManualEnabled) { _, stored in stored }
+        layerAssignedInstrumentIDs = Dictionary(
+            uniqueKeysWithValues: PerformanceLayerPlanner.layerNames.map { layerName in
+                (layerName, snapshot.layerAssignedInstrumentIDs[layerName] ?? "")
+            }
+        )
+        layerPerformanceSettings = Self.defaultLayerPerformanceSettings.merging(snapshot.layerPerformanceSettings) { _, stored in stored }
+        layerLibraryTargetIDs = Dictionary(
+            uniqueKeysWithValues: PerformanceLayerPlanner.layerNames.map { layerName in
+                (layerName, snapshot.layerLibraryTargetIDs[layerName] ?? "")
+            }
+        )
+        layerOutputSettings = Self.defaultLayerOutputSettings.merging(snapshot.layerOutputSettings) { _, stored in stored }
+
+        persistLayerControls()
+        persistLayerAssignments()
+        persistLayerPerformanceSettings()
+        persistLayerLibraryTargets()
+        persistLayerOutputSettings()
+        normalizeLayerAssignments()
+        normalizeLayerLibraryTargets()
+        configureStandaloneSelection()
+        refreshCurrentInput()
+    }
+
+    private func defaultScenePresetName() -> String {
+        "Scene \(scenePresets.count + 1)"
     }
 
     private static var defaultLayerMixMultipliers: [String: Double] {

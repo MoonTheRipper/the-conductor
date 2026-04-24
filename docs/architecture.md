@@ -42,6 +42,7 @@ Native macOS presentation shell:
 - per-layer bus, pan, delay, and reverb routing inside the host graph
 - shared per-layer articulation and voicing controls that affect standalone playback, Logic MIDI, and export
 - loop transport and MIDI export controls in the desktop shell
+- scene preset capture and recall for full local performance-state snapshots
 - searchable catalog UI and indexed library summaries for current sampler-backed hosting
 - live beat-intent diagnostics driven by smoothed hand-tracking confidence
 

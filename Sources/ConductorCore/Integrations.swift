@@ -1,13 +1,13 @@
 import Foundation
 
-public enum RoutingMode: String, CaseIterable, Identifiable, Sendable {
+public enum RoutingMode: String, CaseIterable, Identifiable, Codable, Sendable {
     case standaloneHost = "Standalone Host"
     case logicBridge = "Logic Bridge"
 
     public var id: String { rawValue }
 }
 
-public enum InstrumentFormat: String, CaseIterable, Identifiable, Sendable {
+public enum InstrumentFormat: String, CaseIterable, Identifiable, Codable, Sendable {
     case audioUnit = "AU"
     case vst3 = "VST3"
     case sampleLibrary = "Library"

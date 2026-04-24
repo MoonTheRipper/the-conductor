@@ -1,7 +1,7 @@
 import Foundation
 import simd
 
-public enum PitchClass: Int, CaseIterable, Identifiable, Sendable {
+public enum PitchClass: Int, CaseIterable, Identifiable, Codable, Sendable {
     case c = 0
     case cSharp
     case d

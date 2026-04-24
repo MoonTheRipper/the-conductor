@@ -31,6 +31,7 @@ struct ContentView: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 18) {
                 titlePanel
+                presetPanel
                 routingPanel
                 if viewModel.routingMode == .standaloneHost {
                     standaloneHostPanel
@@ -98,6 +99,42 @@ struct ContentView: View {
             }
         }
         .panelStyle(fill: Color(red: 0.10, green: 0.17, blue: 0.16).opacity(0.55))
+    }
+
+    private var presetPanel: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack {
+                Text("Scenes")
+                    .sectionTitle()
+                Spacer()
+                actionButton("Load", color: .mint, action: viewModel.loadSelectedScenePreset)
+                actionButton("Update", color: .orange, action: viewModel.updateSelectedScenePreset)
+                actionButton("Delete", color: .red, action: viewModel.deleteSelectedScenePreset)
+            }
+
+            TextField("Scene Name", text: $viewModel.scenePresetName)
+                .textFieldStyle(.roundedBorder)
+
+            HStack {
+                actionButton("Save New", color: .cyan, action: viewModel.saveNewScenePreset)
+                if let selectedPreset = viewModel.selectedScenePreset {
+                    Text("Selected: \(selectedPreset.name)")
+                        .font(.system(size: 12, weight: .medium, design: .rounded))
+                        .foregroundStyle(.white.opacity(0.62))
+                }
+            }
+
+            if viewModel.scenePresets.isEmpty {
+                Text("No saved scenes yet. Save the current orchestra, routing, and calibration setup to recall it later.")
+                    .font(.system(size: 12, weight: .medium, design: .rounded))
+                    .foregroundStyle(.white.opacity(0.58))
+            } else {
+                ForEach(viewModel.scenePresets) { preset in
+                    scenePresetRow(preset)
+                }
+            }
+        }
+        .panelStyle(fill: Color(red: 0.14, green: 0.11, blue: 0.05).opacity(0.56))
     }
 
     private var standaloneHostPanel: some View {
@@ -831,6 +868,39 @@ struct ContentView: View {
             RoundedRectangle(cornerRadius: 18, style: .continuous)
                 .fill(Color.black.opacity(0.14))
         )
+    }
+
+    private func scenePresetRow(_ preset: PerformanceScenePreset) -> some View {
+        Button {
+            viewModel.selectScenePreset(id: preset.id.uuidString)
+        } label: {
+            HStack(alignment: .top, spacing: 12) {
+                Circle()
+                    .fill(preset.id.uuidString == viewModel.selectedScenePresetID ? Color.cyan : Color.white.opacity(0.22))
+                    .frame(width: 10, height: 10)
+                    .padding(.top, 4)
+
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(preset.name)
+                        .font(.system(size: 13, weight: .bold, design: .rounded))
+                        .foregroundStyle(.white)
+                    Text(preset.summaryText)
+                        .font(.system(size: 11, weight: .medium, design: .rounded))
+                        .foregroundStyle(.white.opacity(0.62))
+                    Text(preset.updatedAt.formatted(date: .abbreviated, time: .shortened))
+                        .font(.system(size: 11, weight: .medium, design: .rounded))
+                        .foregroundStyle(.white.opacity(0.48))
+                }
+
+                Spacer()
+            }
+            .padding(12)
+            .background(
+                RoundedRectangle(cornerRadius: 18, style: .continuous)
+                    .fill(Color.black.opacity(0.14))
+            )
+        }
+        .buttonStyle(.plain)
     }
 
     private func actionButton(_ title: String, color: Color, action: @escaping () -> Void) -> some View {

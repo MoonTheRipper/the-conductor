@@ -38,6 +38,7 @@ The current app is a working local MVP for the product direction we agreed on. I
 - multi-track MIDI export for the captured loop phrase, with tempo, clip name, and repeat controls
 - richer live hand interpretation from spread, roll, and horizontal motion
 - smoothed live downbeat-intent diagnostics for camera-driven transport engagement
+- saved scene presets for full orchestra, routing, calibration, and export-state recall
 - searchable instrument catalog and indexed library-folder summaries
 
 ## Current Product Modes
@@ -72,6 +73,7 @@ The current loop and control implementation exposes:
 - restart, pause, and clear transport controls in the app UI
 - multi-track standard MIDI file export with one musical track per layer, plus export tempo and repeat metadata controls
 - persistent calibration and layer-trim settings through `UserDefaults`
+- persistent scene presets through `UserDefaults`
 
 Logic's own internal Library patch browser is not a public automation target, so the product should treat Logic integration and standalone hosting as separate capabilities. Library-folder playback in this app is now handled by sampler loading from the user-indexed folders rather than by controlling Logic's proprietary Library UI.
 

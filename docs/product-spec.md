@@ -66,6 +66,7 @@ Loop behavior:
 - layer trims, loop transport, and calibration controls exposed without leaving the main surface
 - standalone routing and effect controls visible without opening a secondary editor
 - per-layer performance shaping visible without opening a secondary editor
+- saved scene recall visible without leaving the main surface
 - live beat-intent diagnostics visible while tuning the camera path
 
 ## Post-MVP Directions

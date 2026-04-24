@@ -805,7 +805,7 @@ final class SessionViewModel: ObservableObject {
                 guard let self else { return }
                 self.availableInstruments = instruments
                 if instruments.contains(where: { $0.id == self.selectedInstrumentID }) == false {
-                    self.selectedInstrumentID = instruments.first?.id ?? ""
+                    self.selectedInstrumentID = self.preferredStartupInstrumentID(from: instruments) ?? ""
                 }
                 self.normalizeLayerAssignments()
                 self.normalizeLayerLibraryTargets()
@@ -1469,6 +1469,22 @@ final class SessionViewModel: ObservableObject {
 
     private func defaultScenePresetName() -> String {
         "Scene \(scenePresets.count + 1)"
+    }
+
+    private func preferredStartupInstrumentID(from instruments: [InstrumentDescriptor]) -> String? {
+        if let hostableAudioUnit = instruments.first(where: { instrument in
+            instrument.format == .audioUnit && standaloneCatalogService.isHostableAudioUnit(instrument.id)
+        }) {
+            return hostableAudioUnit.id
+        }
+
+        if let playableLibrary = instruments.first(where: { instrument in
+            instrument.format == .sampleLibrary && standaloneCatalogService.isStandalonePlayable(instrument.id)
+        }) {
+            return playableLibrary.id
+        }
+
+        return instruments.first?.id
     }
 
     private static var defaultLayerMixMultipliers: [String: Double] {

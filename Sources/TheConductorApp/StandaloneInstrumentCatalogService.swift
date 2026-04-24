@@ -174,7 +174,10 @@ final class StandaloneInstrumentCatalogService: ObservableObject {
 
         switch instrument.format {
         case .audioUnit:
-            return "Hostable now in standalone mode · \(audioUnitTypeLabel(for: instrumentID))"
+            if isHostableAudioUnit(instrumentID) {
+                return "Hostable now in standalone mode · \(audioUnitTypeLabel(for: instrumentID))"
+            }
+            return "Discovered, but direct hosting is only implemented for MIDI-playable Audio Units"
         case .vst3:
             return "Discovered, but VST hosting is not implemented yet"
         case .sampleLibrary:
@@ -189,7 +192,16 @@ final class StandaloneInstrumentCatalogService: ObservableObject {
     }
 
     func isHostableAudioUnit(_ instrumentID: String) -> Bool {
-        audioUnitComponentsByID[instrumentID] != nil
+        guard let component = audioUnitComponentsByID[instrumentID] else {
+            return false
+        }
+
+        switch component.audioComponentDescription.componentType {
+        case kAudioUnitType_MusicDevice, kAudioUnitType_MIDIProcessor:
+            return true
+        default:
+            return false
+        }
     }
 
     func isStandalonePlayable(_ instrumentID: String) -> Bool {
@@ -203,7 +215,8 @@ final class StandaloneInstrumentCatalogService: ObservableObject {
     func catalogLine(for instrument: InstrumentDescriptor) -> String {
         switch instrument.format {
         case .audioUnit:
-            return "\(instrument.format.rawValue) · \(audioUnitTypeLabel(for: instrument.id)) · hostable now · \(instrument.source)"
+            let hostability = isHostableAudioUnit(instrument.id) ? "hostable now" : "discovery only"
+            return "\(instrument.format.rawValue) · \(audioUnitTypeLabel(for: instrument.id)) · \(hostability) · \(instrument.source)"
         case .vst3:
             return "\(instrument.format.rawValue) · discovery only · \(instrument.source)"
         case .sampleLibrary:

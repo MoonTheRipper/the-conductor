@@ -130,7 +130,8 @@ final class StandaloneAudioHostService: ObservableObject {
 
             switch instrument.format {
             case .audioUnit:
-                guard let description = selection.audioUnitDescription else {
+                guard let description = selection.audioUnitDescription,
+                      description.componentType == kAudioUnitType_MusicDevice || description.componentType == kAudioUnitType_MIDIProcessor else {
                     unloadSlot(for: selection.layerName)
                     unsupportedAssignments.append("\(selection.layerName): \(selection.capabilitySummary)")
                     continue

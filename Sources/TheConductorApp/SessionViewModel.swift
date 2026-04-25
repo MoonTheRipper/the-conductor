@@ -133,6 +133,7 @@ final class SessionViewModel: ObservableObject {
     private let standaloneHostService = StandaloneAudioHostService()
     private let loopExportService = MIDILoopExportService()
     private var cancellables = Set<AnyCancellable>()
+    private var liveGestureGate = LiveGestureGate()
     private var loopPlaybackGeneration = 0
     private var loopPlaybackWorkItems: [DispatchWorkItem] = []
     private var loopCycleWorkItem: DispatchWorkItem?
@@ -961,8 +962,10 @@ final class SessionViewModel: ObservableObject {
         switch trackingMode {
         case .simulator:
             liveTrackingService.stop()
+            liveGestureGate.reset()
             refreshFromDebugGesture()
         case .liveCamera:
+            liveGestureGate.reset()
             performanceState.activityText = "Live camera ready"
         }
     }
@@ -1039,7 +1042,13 @@ final class SessionViewModel: ObservableObject {
     private func apply(snapshot: GestureSnapshot) {
         let calibratedSnapshot = calibration.apply(to: snapshot)
         updateLiveDiagnostics(from: calibratedSnapshot)
-        let events = engine.handle(snapshot: calibratedSnapshot)
+        let engineSnapshot: GestureSnapshot
+        if trackingMode == .liveCamera {
+            engineSnapshot = liveGestureGate.process(calibratedSnapshot)
+        } else {
+            engineSnapshot = calibratedSnapshot
+        }
+        let events = engine.handle(snapshot: engineSnapshot)
         performanceState = engine.state
         updateLoopTransportStatus()
         processPerformanceEvents(events)
